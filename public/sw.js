@@ -1,26 +1,36 @@
 /* Service Worker Flash.
  *
- *  • Оболочка приложения (страницы и статические файлы) кэшируется — приложение открывается без сети.
- *  • Запросы к API и видео в кэш не попадают: данные приватны, а видео отдаётся с перемоткой (Range).
- *  • Push-уведомления: показ, открытие нужного экрана по нажатию, восстановление подписки.
+ * Flash — набор статических файлов без сервера. Воркер при установке кладёт в кэш всю сборку
+ * (страницы, скрипты, шрифты, иконки), поэтому приложение открывается и работает без интернета.
+ * Музыка для фильмов кэшируется по мере использования. Данные дневника (видео, фильмы) живут
+ * в IndexedDB и через воркер не проходят.
  *
- * В режиме разработки (sw.js?dev=1) кэширование выключено, чтобы не мешать горячей перезагрузке.
+ * Сайт может делить адрес с другими сайтами (на GitHub Pages — username.github.io),
+ * поэтому воркер трогает только свои кэши (с приставкой flash-) и только запросы внутри своей папки.
  */
 
-const VERSION = "flash-v2";
-const STATIC_CACHE = `${VERSION}-static`;
-const PAGES_CACHE = `${VERSION}-pages`;
-const DEV = new URL(self.location.href).searchParams.get("dev") === "1";
-// Запасной экран — самодостаточный HTML без скриптов приложения: он откроется, даже если
-// в кэше нет ни одного файла сборки.
-const OFFLINE_URL = "/offline.html";
+const VERSION = "__BUILD_ID__";
+const STATIC_PREFIX = "flash-static-";
+const STATIC = `${STATIC_PREFIX}${VERSION}`;
+const MEDIA = "flash-media-v1";
+const BASE = new URL(self.registration.scope).pathname.replace(/\/$/, "");
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      if (!DEV) {
-        const cache = await caches.open(PAGES_CACHE);
-        await cache.add(new Request(OFFLINE_URL, { cache: "reload" })).catch(() => {});
+      const res = await fetch(`${BASE}/precache.json?v=${VERSION}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`precache.json: HTTP ${res.status}`);
+      const { files } = await res.json();
+      const cache = await caches.open(STATIC);
+      // Небольшими пачками: сотни одновременных запросов мобильная сеть не любит.
+      for (let i = 0; i < files.length; i += 8) {
+        await Promise.all(
+          files.slice(i, i + 8).map(async (path) => {
+            const response = await fetch(`${BASE}${path}`, { cache: "no-cache" });
+            if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+            await cache.put(`${BASE}${path}`, response);
+          }),
+        );
       }
       await self.skipWaiting();
     })(),
@@ -30,184 +40,98 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys();
-      await Promise.all(keys.filter((key) => !key.startsWith(VERSION)).map((key) => caches.delete(key)));
+      // Предыдущая сборка остаётся: открытая вкладка со старой версией ещё может догружать её файлы.
+      const mine = (await caches.keys()).filter((key) => key.startsWith(STATIC_PREFIX) && key !== STATIC);
+      for (const key of mine.slice(0, -1)) await caches.delete(key);
       await self.clients.claim();
     })(),
   );
 });
 
-async function cacheFirst(request) {
-  const cache = await caches.open(STATIC_CACHE);
-  const cached = await cache.match(request);
-  if (cached) return cached;
-  const response = await fetch(request);
-  if (response.ok) cache.put(request, response.clone()).catch(() => {});
-  return response;
+/** Ищет файл в текущей сборке, затем в предыдущих. */
+async function fromStatic(key, options) {
+  const current = await caches.open(STATIC);
+  const hit = await current.match(key, options);
+  if (hit) return hit;
+  for (const name of (await caches.keys()).reverse()) {
+    if (!name.startsWith(STATIC_PREFIX) || name === STATIC) continue;
+    const old = await (await caches.open(name)).match(key, options);
+    if (old) return old;
+  }
+  return undefined;
 }
 
-/**
- * Кладёт в кэш скрипты, стили и шрифты, на которые ссылается страница. Без этого сохранённая
- * страница, которую человек ещё ни разу не открывал, без сети показала бы только заставку:
- * её HTML есть, а кода нет.
- */
-async function cachePageAssets(html) {
-  const cache = await caches.open(STATIC_CACHE);
-  const assets = new Set();
-  for (const match of html.matchAll(/\/_next\/static\/[A-Za-z0-9_\-./~]+\.(?:js|css|woff2)/g)) assets.add(match[0]);
-  await Promise.all(
-    [...assets].map(async (asset) => {
-      try {
-        if (await cache.match(asset)) return;
-        const response = await fetch(asset);
-        if (response.ok) await cache.put(asset, response);
-      } catch {
-        /* нет сети — файл докачается при следующем открытии */
-      }
-    }),
-  );
-}
-
-function withTimeout(promise, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
+/** Ответ на запрос части файла (плееру нужна перемотка): вырезает диапазон из закэшированного файла. */
+async function ranged(response, rangeHeader) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader || "");
+  if (!match) return response;
+  const blob = await response.blob();
+  const size = blob.size;
+  let start = match[1] === "" ? Math.max(0, size - Number(match[2])) : Number(match[1]);
+  let end = match[1] !== "" && match[2] !== "" ? Math.min(size - 1, Number(match[2])) : size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+    return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+  }
+  return new Response(blob.slice(start, end + 1), {
+    status: 206,
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") || "application/octet-stream",
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Content-Length": String(end - start + 1),
+      "Accept-Ranges": "bytes",
+    },
   });
 }
 
-/** Страницы: сначала сеть (свежая версия), при неудаче — сохранённая копия, затем экран «нет сети». */
-async function handleNavigation(request) {
-  const url = new URL(request.url);
-  const cache = await caches.open(PAGES_CACHE);
+async function media(request) {
+  const cache = await caches.open(MEDIA);
+  const url = request.url;
+  let cached = await cache.match(url);
+  if (!cached) {
+    // В кэш кладём файл целиком, даже если плеер попросил только его часть.
+    const full = await fetch(url);
+    if (!full.ok || full.status !== 200) return full;
+    await cache.put(url, full.clone());
+    cached = full;
+  }
+  const range = request.headers.get("Range");
+  return range ? ranged(cached, range) : cached;
+}
+
+async function page(request, url) {
+  let path = url.pathname;
+  if (!path.endsWith("/") && !/\.[a-z0-9]+$/i.test(path)) path += "/";
+  const key = path.endsWith("/") ? `${path}index.html` : path;
+  // Сначала сеть не нужна: страницы лежат в кэше сборки. Параметры адреса (?id=…) читает само приложение.
+  const hit = await fromStatic(key);
+  if (hit) return hit;
   try {
-    const response = await withTimeout(fetch(request), 6000);
-    if (response.ok && response.type === "basic") cache.put(url.pathname, response.clone()).catch(() => {});
-    return response;
+    return await fetch(request);
   } catch {
-    const cached = (await cache.match(url.pathname)) || (await cache.match(OFFLINE_URL));
-    if (cached) return cached;
-    return new Response("Нет подключения к интернету", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
+    return (await fromStatic(`${BASE}/index.html`)) || Response.error();
   }
 }
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (DEV || request.method !== "GET") return;
+  if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  // API, видео и сам воркер всегда идут в сеть.
-  if (url.pathname.startsWith("/api/") || url.pathname === "/sw.js") return;
-  // Служебные запросы клиентской навигации Next.js не кэшируем: без сети он сам перейдёт на обычную загрузку страницы.
-  if (url.searchParams.has("_rsc") || request.headers.get("RSC") === "1") return;
+  if (url.origin !== self.location.origin || !url.pathname.startsWith(`${BASE}/`)) return;
+  if (url.pathname === `${BASE}/sw.js` || url.pathname === `${BASE}/precache.json`) return;
 
-  if (
-    url.pathname.startsWith("/_next/static/") ||
-    url.pathname.startsWith("/icons/") ||
-    url.pathname.startsWith("/splash/")
-  ) {
-    event.respondWith(cacheFirst(request));
+  if (url.pathname.startsWith(`${BASE}/music/`) && !url.pathname.endsWith(".json")) {
+    event.respondWith(media(request));
     return;
   }
   if (request.mode === "navigate") {
-    event.respondWith(handleNavigation(request));
+    event.respondWith(page(request, url));
+    return;
   }
-});
-
-self.addEventListener("message", (event) => {
-  const data = event.data || {};
-  if (data.type === "cache-shell" && Array.isArray(data.paths) && !DEV) {
-    event.waitUntil(
-      (async () => {
-        const cache = await caches.open(PAGES_CACHE);
-        for (const path of data.paths) {
-          if (typeof path !== "string" || !path.startsWith("/")) continue;
-          try {
-            const response = await fetch(path, { credentials: "same-origin" });
-            if (response.ok && response.type === "basic") {
-              const html = await response.clone().text();
-              await cache.put(path, response);
-              await cachePageAssets(html);
-            }
-          } catch {
-            /* нет сети — попробуем в следующий раз */
-          }
-        }
-      })(),
-    );
-  }
-});
-
-// ── Push-уведомления ─────────────────────────────────────────
-
-self.addEventListener("push", (event) => {
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch {
-    data = { body: event.data ? event.data.text() : "" };
-  }
-  const title = data.title || "Flash";
-  event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || "",
-      icon: "/icons/icon-192.png",
-      badge: "/icons/badge-96.png",
-      tag: data.tag || "flash",
-      renotify: true,
-      lang: "ru",
-      data: { url: data.url || "/" },
-    }),
-  );
-});
-
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const path = (event.notification.data && event.notification.data.url) || "/";
-  const target = new URL(path, self.location.origin).href;
-  event.waitUntil(
+  event.respondWith(
     (async () => {
-      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      for (const client of windows) {
-        if ("focus" in client) {
-          await client.focus();
-          if ("navigate" in client && client.url !== target) await client.navigate(target).catch(() => {});
-          return;
-        }
-      }
-      await self.clients.openWindow(target);
-    })(),
-  );
-});
-
-// Браузер сменил push-подписку (истёк срок, обновились ключи): подписываемся заново и сообщаем серверу.
-self.addEventListener("pushsubscriptionchange", (event) => {
-  event.waitUntil(
-    (async () => {
-      try {
-        const options = (event.oldSubscription && event.oldSubscription.options) || { userVisibleOnly: true };
-        const subscription = event.newSubscription || (await self.registration.pushManager.subscribe(options));
-        const json = subscription.toJSON();
-        await fetch("/api/push/subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
-        });
-      } catch {
-        /* при следующем запуске приложение восстановит подписку само */
-      }
+      // У файлов сборки имя уже содержит отпечаток содержимого; у остальных параметры (?_rsc=…) не важны.
+      const hit = await fromStatic(`${url.origin}${url.pathname}`);
+      return hit || fetch(request);
     })(),
   );
 });

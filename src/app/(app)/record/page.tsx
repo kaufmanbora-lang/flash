@@ -6,13 +6,11 @@ import { CameraOff, Check, Images, MicOff, RefreshCw, SwitchCamera, X } from "lu
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import useSWR from "swr";
-import { api, fetcher } from "@/client/api";
+import { ApiError, errorText, fetcher } from "@/client/api";
 import { haptic } from "@/client/haptics";
-import { useDrafts, useHome, useToday } from "@/client/hooks";
+import { useHome, useToday } from "@/client/hooks";
 import { useLocale, useT } from "@/client/i18n";
-import { clearChunks, freeSpaceBytes, isQuotaError, putChunk } from "@/client/idb";
 import { isIos } from "@/client/pwa";
-import { newClientId, uploader } from "@/client/uploader";
 import {
   cameraAvailability,
   classifyCameraError,
@@ -32,7 +30,10 @@ import { useToast } from "@/components/ui/Toast";
 import { MAX_MOMENTS_PER_DAY, MIN_MOMENT_MS, NOTE_MAX } from "@/lib/constants";
 import { deviceHm, deviceYmd } from "@/lib/dates";
 import { fmtClock, fmtDayMonth } from "@/lib/format";
-import type { DaySummary, ProjectDto } from "@/lib/types";
+import type { ProjectDto } from "@/lib/types";
+import { saveMoment } from "@/local/moments";
+import { clearChunks, freeSpaceBytes, putChunk } from "@/local/recording";
+import { newId } from "@/local/store";
 
 type Facing = "user" | "environment";
 type Phase = "starting" | "ready" | "recording" | "finishing" | "review" | "error" | "limit";
@@ -61,7 +62,6 @@ export default function RecordPage() {
   const router = useRouter();
   const today = useToday();
   const { locale } = useLocale();
-  const drafts = useDrafts();
   const { data: home, error: homeError } = useHome();
   const { data: projectsData } = useSWR<{ projects: ProjectDto[] }>(`/api/projects?status=open&today=${today}`, fetcher);
 
@@ -104,8 +104,7 @@ export default function RecordPage() {
     setPhaseState(next);
   }, []);
 
-  const todayPending = drafts.filter((d) => d.localDate === today && d.state !== "failed").length;
-  const todayCount = (home?.today.count ?? 0) + todayPending;
+  const todayCount = home?.today.count ?? 0;
   const limit = home?.today.limit ?? MAX_MOMENTS_PER_DAY;
 
   // День, к которому относится запись: для съёмки — сегодня, для видео из галереи — выбранная дата.
@@ -270,7 +269,7 @@ export default function RecordPage() {
         return;
       }
     }
-    const session = newClientId();
+    const session = newId();
     sessionRef.current = session;
     chunksRef.current = [];
     seqRef.current = 0;
@@ -389,7 +388,12 @@ export default function RecordPage() {
       return;
     }
     const meta = await readVideoMeta(file);
-    if (meta.durationMs > 0 && meta.durationMs < MIN_MOMENT_MS) {
+    // Видео хранится и монтируется прямо в браузере, поэтому файл, который браузер не читает, не подойдёт.
+    if (!(meta.durationMs > 0) || !(meta.width > 0) || !(meta.height > 0)) {
+      toast(t.errors.unreadable_video, "error");
+      return;
+    }
+    if (meta.durationMs < MIN_MOMENT_MS) {
       toast(r.tooShortFile, "error");
       return;
     }
@@ -436,21 +440,9 @@ export default function RecordPage() {
     try {
       const at = recorded.source === "upload" ? when : recorded.recordedAt;
       const localDate = deviceYmd(at);
-      const sameDayLocal = drafts.filter((d) => d.localDate === localDate && d.state !== "failed").length;
-      let sameDayServer = localDate === today ? (home?.today.count ?? 0) : 0;
-      if (localDate !== today && navigator.onLine) {
-        const res = await api<{ days: DaySummary[] }>(`/api/calendar?from=${localDate}&to=${localDate}`).catch(() => null);
-        sameDayServer = res?.days[0]?.count ?? 0;
-      }
-      if (sameDayServer + sameDayLocal >= MAX_MOMENTS_PER_DAY) {
-        toast(localDate === today ? t.errors.daily_limit : r.limitDay(fmtDayMonth(localDate, locale)), "error");
-        return;
-      }
-      await uploader.add({
-        clientId: newClientId(),
+      await saveMoment({
         blob: recorded.blob,
         mime: recorded.mime,
-        size: recorded.blob.size,
         recordedAt: at.toISOString(),
         localDate,
         localTime: deviceHm(at),
@@ -461,19 +453,18 @@ export default function RecordPage() {
         width: recorded.width,
         height: recorded.height,
         poster: recorded.poster,
-        state: "queued",
-        error: null,
-        momentId: null,
-        uploadedBytes: 0,
-        attempts: 0,
-        createdAt: Date.now(),
       });
       if (recorded.session) await clearChunks(recorded.session).catch(() => {});
       haptic("success");
-      toast(navigator.onLine ? r.saved : r.savedOffline, "success");
+      toast(r.saved, "success");
       router.replace("/");
     } catch (err) {
-      toast(isQuotaError(err) ? r.noSpace : t.errors.generic, "error");
+      const code = err instanceof ApiError ? err.code : "";
+      if (code === "quota_exceeded") toast(r.noSpace, "error");
+      else if (code === "daily_limit") {
+        const day = deviceYmd(recorded.source === "upload" ? when : recorded.recordedAt);
+        toast(day === today ? t.errors.daily_limit : r.limitDay(fmtDayMonth(day, locale)), "error");
+      } else toast(errorText(t, err), "error");
     } finally {
       setSaving(false);
     }

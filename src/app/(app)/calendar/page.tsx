@@ -7,12 +7,12 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 import useSWR from "swr";
 import { errorText, fetcher } from "@/client/api";
-import { useDrafts, useToday } from "@/client/hooks";
+import { useToday } from "@/client/hooks";
 import { useLocale, useT } from "@/client/i18n";
 import { Page, Reveal, TitleHeader } from "@/components/app/Page";
 import { CreateFilmSheet } from "@/components/films/CreateFilmSheet";
 import { OnThisDay } from "@/components/home/ActivityParts";
-import { DraftTile, MomentThumb } from "@/components/moments/MomentThumb";
+import { MomentThumb } from "@/components/moments/MomentThumb";
 import { MomentViewer } from "@/components/moments/MomentViewer";
 import { Button, IconButton } from "@/components/ui/Button";
 import { Segmented } from "@/components/ui/Controls";
@@ -273,7 +273,6 @@ export default function CalendarPage() {
   const a = t.archive;
   const { locale } = useLocale();
   const today = useToday();
-  const drafts = useDrafts();
 
   const [tab, setTab] = useState<Tab>("calendar");
   const [month, setMonth] = useState<Ymd>(() => startOfMonth(today));
@@ -294,7 +293,6 @@ export default function CalendarPage() {
   const { data: dayData } = useSWR<{ moments: MomentDto[] }>(
     tab === "calendar" && !searching ? `/api/moments?date=${selected}&order=asc` : null,
     fetcher,
-    { refreshInterval: (d) => (d?.moments.some((m) => m.status === "processing") ? 3000 : 0) },
   );
   const { data: found, isLoading: finding } = useSWR<{ moments: MomentDto[] }>(
     searching && deferredQuery.length >= 2 ? `/api/moments?q=${encodeURIComponent(deferredQuery)}&limit=90` : null,
@@ -304,9 +302,7 @@ export default function CalendarPage() {
 
   const dayMap = useMemo(() => new Map((monthData?.days ?? []).map((d) => [d.date, d])), [monthData]);
   const dayMoments = dayData?.moments ?? [];
-  const dayDrafts = drafts.filter((d) => d.localDate === selected);
-  const dayReady = dayMoments.filter((m) => m.status === "ready");
-  const dayDuration = dayReady.reduce((s, m) => s + m.durationMs, 0);
+  const dayDuration = dayMoments.reduce((s, m) => s + m.durationMs, 0);
 
   const pickDay = (date: Ymd) => {
     setSelected(date);
@@ -443,17 +439,14 @@ export default function CalendarPage() {
                     <h2 className="t-section">{selected === today ? t.common.today : selected === addDays(today, -1) ? t.common.yesterday : fmtDayMonth(selected, locale)}</h2>
                     <p className="t-caption mt-0.5">
                       {capitalize(fmtWeekday(selected, locale))}
-                      {dayReady.length > 0 ? ` · ${a.daySummary(dayReady.length, dayDuration)}` : ""}
+                      {dayMoments.length > 0 ? ` · ${a.daySummary(dayMoments.length, dayDuration)}` : ""}
                     </p>
                   </div>
 
-                  {dayMoments.length + dayDrafts.length > 0 ? (
+                  {dayMoments.length > 0 ? (
                     <div className="grid grid-cols-3 gap-3">
                       {dayMoments.map((m) => (
                         <MomentThumb key={m.id} moment={m} caption={m.time} onClick={() => setViewing(m)} className="w-full" />
-                      ))}
-                      {dayDrafts.map((d) => (
-                        <DraftTile key={d.clientId} draft={d} className="w-full" />
                       ))}
                     </div>
                   ) : !dayData ? (
@@ -478,7 +471,7 @@ export default function CalendarPage() {
                     </div>
                   )}
 
-                  {dayReady.length > 0 && (
+                  {dayMoments.length > 0 && (
                     <Button variant="glass" block className="mt-4" icon={<Clapperboard aria-hidden="true" size={18} />} onClick={() => setFilmSheet(true)}>
                       {a.makeDayFilm}
                     </Button>

@@ -5,8 +5,6 @@ import useSWR, { type SWRConfiguration } from "swr";
 import { deviceYmd, type Ymd } from "@/lib/dates";
 import type { HomeDto, MeDto } from "@/lib/types";
 import { fetcher } from "./api";
-import type { DraftInfo } from "./idb";
-import { uploader } from "./uploader";
 
 /** Сегодняшняя дата по часам устройства; обновляется после полуночи и при возврате в приложение. */
 export function useToday(): Ymd {
@@ -25,23 +23,8 @@ export function useToday(): Ymd {
   return today;
 }
 
-export function useOnline(): boolean {
-  return useSyncExternalStore(
-    (fn) => {
-      window.addEventListener("online", fn);
-      window.addEventListener("offline", fn);
-      return () => {
-        window.removeEventListener("online", fn);
-        window.removeEventListener("offline", fn);
-      };
-    },
-    () => navigator.onLine,
-    () => true,
-  );
-}
-
 export function useMe(config?: SWRConfiguration<MeDto>) {
-  return useSWR<MeDto>("/api/me", fetcher, { revalidateOnFocus: false, dedupingInterval: 15_000, ...config });
+  return useSWR<MeDto>("/api/me", fetcher, config);
 }
 
 export function homeKey(today: Ymd): string {
@@ -50,22 +33,7 @@ export function homeKey(today: Ymd): string {
 
 export function useHome() {
   const today = useToday();
-  return useSWR<HomeDto>(homeKey(today), fetcher, {
-    // Пока что-то обрабатывается или монтируется — опрашиваем чаще.
-    refreshInterval: (data) => {
-      if (!data) return 0;
-      const busy =
-        data.rendering.length > 0 ||
-        data.today.moments.some((m) => m.status === "processing") ||
-        data.recent.some((m) => m.status === "processing");
-      return busy ? 3000 : 0;
-    },
-  });
-}
-
-/** Моменты, которые ещё лежат на устройстве и ждут загрузки. */
-export function useDrafts(): DraftInfo[] {
-  return useSyncExternalStore(uploader.subscribe, uploader.getSnapshot, uploader.getServerSnapshot);
+  return useSWR<HomeDto>(homeKey(today), fetcher);
 }
 
 export function useMediaQuery(query: string): boolean {
@@ -85,4 +53,19 @@ export function useMounted(): boolean {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   return mounted;
+}
+
+/**
+ * Параметр из адресной строки (?id=…). Страницы приложения — статические файлы, поэтому идентификатор
+ * фильма или проекта передаётся параметром, а не частью пути. До монтирования возвращает undefined.
+ */
+export function useQueryParam(name: string): string | null | undefined {
+  const [value, setValue] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    const read = () => setValue(new URLSearchParams(window.location.search).get(name));
+    read();
+    window.addEventListener("popstate", read);
+    return () => window.removeEventListener("popstate", read);
+  }, [name]);
+  return value;
 }

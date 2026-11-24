@@ -45,7 +45,7 @@ export function ProjectsCarousel({ projects }: { projects: ProjectDto[] }) {
         {projects.map((project) => (
           <Link
             key={project.id}
-            href={`/projects/${project.id}`}
+            href={`/project?id=${project.id}`}
             onClick={() => haptic("light")}
             aria-label={`${t.project.eyebrow}: ${project.title}`}
             className={many ? "block w-[88%] shrink-0 snap-center" : "block"}

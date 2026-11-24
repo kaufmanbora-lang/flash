@@ -4,10 +4,9 @@ import { Download, Send } from "lucide-react";
 import type { ReactNode } from "react";
 import { useLocale, useT } from "@/client/i18n";
 import { startDownload } from "@/client/share";
-import { qualityLabel } from "@/components/films/FilmCard";
+import { formatLabel, qualityLabel } from "@/components/films/FilmCard";
 import { useToast } from "@/components/ui/Toast";
 import { fmtBytes } from "@/lib/format";
-import { safeName } from "@/lib/names";
 import type { FilmDto } from "@/lib/types";
 
 function Tile({ icon, title, hint, onClick }: { icon: ReactNode; title: string; hint: string; onClick: () => void }) {
@@ -22,7 +21,7 @@ function Tile({ icon, title, hint, onClick }: { icon: ReactNode; title: string; 
   );
 }
 
-/** Две плитки под плеером: скачать MP4 и поделиться. Подпись стоит под заголовком и не обрезается. */
+/** Две плитки под плеером: сохранить файл и поделиться. Подпись стоит под заголовком и не обрезается. */
 export function FilmActionTiles({ film, onShare }: { film: FilmDto; onShare: () => void }) {
   const t = useT();
   const toast = useToast();
@@ -32,10 +31,10 @@ export function FilmActionTiles({ film, onShare }: { film: FilmDto; onShare: () 
       <Tile
         icon={<Download aria-hidden="true" size={20} strokeWidth={2} />}
         title={t.share.download}
-        hint={t.share.downloadHint(qualityLabel(film), fmtBytes(film.sizeBytes, t.fmt.bytes, locale))}
+        hint={t.share.downloadHint(formatLabel(film), qualityLabel(film), fmtBytes(film.sizeBytes, t.fmt.bytes, locale))}
         onClick={() => {
           if (!film.downloadUrl) return;
-          startDownload(film.downloadUrl, `${safeName(film.title)}.mp4`);
+          startDownload(film.downloadUrl, film.fileName);
           toast(t.share.started, "success");
         }}
       />

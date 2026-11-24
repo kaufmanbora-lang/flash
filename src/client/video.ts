@@ -27,7 +27,7 @@ function once(target: EventTarget, events: string[], timeoutMs: number): Promise
 
 /**
  * Читает длительность и размеры видео и снимает кадр для превью.
- * Не падает на «трудных» файлах: чего не удалось узнать, вернётся нулём, а сервер проверит сам.
+ * Не падает на «трудных» файлах: чего не удалось узнать, вернётся нулём — такое видео приложение не примет.
  */
 export async function readVideoMeta(blob: Blob, knownDurationMs = 0): Promise<VideoMeta> {
   const meta: VideoMeta = { durationMs: knownDurationMs, width: 0, height: 0, poster: null };
@@ -72,7 +72,7 @@ export async function readVideoMeta(blob: Blob, knownDurationMs = 0): Promise<Vi
         meta.poster = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
       }
     } catch {
-      /* превью появится после обработки на сервере */
+      /* момент сохранится без превью */
     }
     return meta;
   } catch {
@@ -86,7 +86,7 @@ export async function readVideoMeta(blob: Blob, knownDurationMs = 0): Promise<Vi
 
 /**
  * Формат записи: MP4 (H.264 + AAC) там, где браузер его умеет (Safari на iPhone, новые Chrome),
- * иначе WebM. Сервер в любом случае сделает версию, которая играет везде.
+ * иначе WebM. Запись хранится как есть и монтируется в фильм прямо в браузере.
  */
 export function pickRecorderMime(): string {
   if (typeof MediaRecorder === "undefined") return "";

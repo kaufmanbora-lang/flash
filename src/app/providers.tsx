@@ -1,53 +1,31 @@
 "use client";
 
 import { MotionConfig } from "framer-motion";
-import type { ReactNode } from "react";
-import { SWRConfig, type Cache, type State } from "swr";
+import { useEffect, type ReactNode } from "react";
+import { SWRConfig, useSWRConfig } from "swr";
 import { fetcher } from "@/client/api";
 import { I18nProvider } from "@/client/i18n";
 import { ToastProvider } from "@/components/ui/Toast";
-
-const CACHE_KEY = "flash-cache-v1";
+import { store } from "@/local/store";
 
 /**
- * Кэш запросов, который переживает перезапуск: при открытии без сети приложение
- * показывает последние загруженные данные, а не пустые экраны.
+ * Экраны читают данные через SWR по адресам вида /api/…; когда в хранилище на устройстве что-то
+ * меняется (в этой вкладке или в соседней), все открытые выборки перечитываются.
  */
-function persistentCache(): Cache {
-  const map = new Map<string, State>();
-  if (typeof window === "undefined") return map as Cache;
-  try {
-    const saved = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "[]") as [string, State][];
-    for (const [key, value] of saved) map.set(key, value);
-  } catch {
-    /* повреждённый кэш просто игнорируется */
-  }
-  const save = () => {
-    try {
-      // Данные сохраняются и тогда, когда последнее обновление не удалось: без сети «устаревшие»
-      // данные — единственное, что можно показать при следующем запуске.
-      const entries = [...map.entries()]
-        .filter(([key, value]) => key.startsWith("/api/") && value?.data !== undefined)
-        .slice(-40)
-        .map(([key, value]) => [key, { data: value.data }]);
-      localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
-    } catch {
-      /* место закончилось — кэш не критичен */
-    }
-  };
-  window.addEventListener("pagehide", save);
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") save();
-  });
-  return map as Cache;
-}
-
-export function clearPersistentCache(): void {
-  try {
-    localStorage.removeItem(CACHE_KEY);
-  } catch {
-    /* не критично */
-  }
+function StoreSync() {
+  const { mutate } = useSWRConfig();
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = store.subscribe(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void mutate((key) => typeof key === "string" && key.startsWith("/api/")), 30);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [mutate]);
+  return null;
 }
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -55,14 +33,16 @@ export function Providers({ children }: { children: ReactNode }) {
     <SWRConfig
       value={{
         fetcher,
-        provider: persistentCache,
-        revalidateOnFocus: true,
+        // Данные лежат на устройстве: перечитывать их при возврате в окно незачем — об изменениях сообщает хранилище.
+        revalidateOnFocus: false,
+        revalidateOnReconnect: false,
         revalidateIfStale: true,
         keepPreviousData: true,
         shouldRetryOnError: false,
-        dedupingInterval: 2000,
+        dedupingInterval: 0,
       }}
     >
+      <StoreSync />
       <MotionConfig reducedMotion="user">
         <I18nProvider>
           <ToastProvider>{children}</ToastProvider>

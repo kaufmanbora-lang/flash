@@ -2,8 +2,8 @@
 
 import { Download, Heart, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
-import { api, codeText, errorText, fetcher } from "@/client/api";
+import useSWR from "swr";
+import { api, errorText, fetcher } from "@/client/api";
 import { useToday } from "@/client/hooks";
 import { useLocale, useT } from "@/client/i18n";
 import { startDownload } from "@/client/share";
@@ -23,7 +23,6 @@ export function MomentViewer({ moment, onClose }: { moment: MomentDto | null; on
   const toast = useToast();
   const today = useToday();
   const { locale } = useLocale();
-  const { mutate } = useSWRConfig();
   const { data: projectsData } = useSWR<{ projects: ProjectDto[] }>(moment ? `/api/projects?today=${today}` : null, fetcher);
 
   const [current, setCurrent] = useState<MomentDto | null>(moment);
@@ -37,14 +36,11 @@ export function MomentViewer({ moment, onClose }: { moment: MomentDto | null; on
     setNote(moment?.note ?? "");
   }, [moment]);
 
-  const refreshLists = () => mutate((key) => typeof key === "string" && key.startsWith("/api/") && key !== "/api/me");
-
   const patch = async (body: Record<string, unknown>) => {
     if (!current) return;
     try {
       const res = await api<{ moment: MomentDto }>(`/api/moments/${current.id}`, { method: "PATCH", body });
       setCurrent(res.moment);
-      void refreshLists();
     } catch (err) {
       toast(errorText(t, err), "error");
     }
@@ -66,7 +62,6 @@ export function MomentViewer({ moment, onClose }: { moment: MomentDto | null; on
       toast(m.deleted, "success");
       setConfirmDelete(false);
       onClose();
-      void refreshLists();
     } catch (err) {
       toast(errorText(t, err), "error");
     } finally {
@@ -107,7 +102,7 @@ export function MomentViewer({ moment, onClose }: { moment: MomentDto | null; on
               />
             ) : (
               <div className="glass grid min-h-[200px] place-items-center p-6 text-center text-[15px] text-muted-strong">
-                {current.status === "failed" ? codeText(t, current.error) : m.processing}
+                {t.player.error}
               </div>
             )}
 
@@ -126,7 +121,7 @@ export function MomentViewer({ moment, onClose }: { moment: MomentDto | null; on
                   variant="glass"
                   block
                   icon={<Download aria-hidden="true" size={18} />}
-                  onClick={() => startDownload(current.downloadUrl!, `Flash ${current.date} ${current.time.replace(":", "-")}`)}
+                  onClick={() => startDownload(current.downloadUrl!, current.fileName)}
                 >
                   {m.download}
                 </Button>

@@ -1,13 +1,16 @@
-const securityHeaders = [
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "Referrer-Policy", value: "same-origin" },
-  // Камера и микрофон нужны только самому приложению.
-  { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
-];
+// Flash собирается в набор статических файлов (папка out) и может лежать на любом статическом хостинге.
+// На GitHub Pages сайт живёт в подпапке репозитория, поэтому путь задаётся переменной окружения:
+//   NEXT_PUBLIC_BASE_PATH=/flash npm run build
+
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "export",
+  basePath,
+  // Каждая страница — папка с index.html: так адреса одинаково работают на любом статическом сервере.
+  trailingSlash: true,
+  images: { unoptimized: true },
   poweredByHeader: false,
   reactStrictMode: true,
   // Значок Next.js в режиме разработки перекрывал бы плавающую навигацию.
@@ -19,25 +22,6 @@ const nextConfig = {
         as: "*.css",
       },
     },
-  },
-  // Нативные и чисто серверные пакеты не нужно прогонять через бандлер.
-  serverExternalPackages: ["pg", "web-push", "yazl", "@aws-sdk/client-s3"],
-  async headers() {
-    return [
-      { source: "/(.*)", headers: securityHeaders },
-      {
-        source: "/sw.js",
-        headers: [
-          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
-          { key: "Service-Worker-Allowed", value: "/" },
-          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
-        ],
-      },
-      {
-        source: "/manifest.webmanifest",
-        headers: [{ key: "Cache-Control", value: "public, max-age=3600" }],
-      },
-    ];
   },
 };
 

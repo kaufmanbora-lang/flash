@@ -6,7 +6,6 @@ import Link from "next/link";
 import { haptic } from "@/client/haptics";
 import { useLocale, useT } from "@/client/i18n";
 import type { Dict } from "@/i18n";
-import { Ring } from "@/components/ui/Feedback";
 import { addDays, type Ymd } from "@/lib/dates";
 import { fmtClock, fmtDayMonth, fmtRange } from "@/lib/format";
 import type { FilmDto } from "@/lib/types";
@@ -17,15 +16,21 @@ export function isRendering(film: FilmDto): boolean {
 
 export function qualityLabel(film: Pick<FilmDto, "width" | "height">): string {
   const short = Math.min(film.width, film.height);
-  if (!short) return "MP4";
+  if (!short) return "";
   return short >= 2160 ? "4K" : short >= 1440 ? "2K" : `${short}p`;
 }
 
+/** Формат файла фильма: MP4 почти везде, WebM — если браузер не умеет кодировать H.264. */
+export const formatLabel = (film: Pick<FilmDto, "mime">): string => (film.mime.includes("webm") ? "WebM" : "MP4");
+
+/** Адрес страницы фильма. Страницы статические, поэтому идентификатор передаётся параметром. */
+export const filmHref = (id: string): string => `/film?id=${id}`;
+/** Адрес экрана сборки («премьеры») фильма. */
+export const renderHref = (id: string): string => `/render?film=${id}`;
+
 /** Строка под названием фильма: версия и длительность либо этап монтажа. */
 export function filmMeta(t: Dict, film: FilmDto): string {
-  if (isRendering(film) && !film.hasFile) {
-    return film.status === "queued" ? t.films.status.queued : (t.films.stages[film.stage] ?? t.films.status.rendering);
-  }
+  if (isRendering(film) && !film.hasFile) return film.status === "queued" ? t.films.status.queued : t.films.status.rendering;
   if (film.status === "failed") return t.films.status.failed;
   return `${t.film.variants[film.variant]} · ${t.fmt.duration(film.durationMs)}`;
 }
@@ -52,14 +57,12 @@ export function FilmCard({ film }: { film: FilmDto }) {
   const rendering = isRendering(film);
   const dates = film.kind === "day" ? fmtDayMonth(film.dateFrom, locale) : fmtRange(film.dateFrom, film.dateTo, locale);
   return (
-    <Link href={`/films/${film.id}`} onClick={() => haptic("light")} className="glass press flex items-center gap-3.5 p-2.5 pr-3">
+    <Link href={filmHref(film.id)} onClick={() => haptic("light")} className="glass press flex items-center gap-3.5 p-2.5 pr-3">
       <span className="relative shrink-0">
         <Poster film={film} className="h-[92px] w-[70px] rounded-[20px]" />
-        {rendering ? (
-          <span className="absolute inset-0 grid place-items-center rounded-[20px] bg-black/45">
-            <Ring value={film.progress} size={42} stroke={4} tone="dark" label={t.films.renderingAria(Math.round(film.progress * 100))}>
-              <span className="tabular text-[11px] font-bold text-white">{Math.round(film.progress * 100)}</span>
-            </Ring>
+        {rendering && !film.hasFile ? (
+          <span className="absolute inset-0 grid place-items-center rounded-[20px] bg-black/35 text-white">
+            <Clapperboard aria-hidden="true" size={22} strokeWidth={1.8} />
           </span>
         ) : film.status === "failed" ? (
           <span className="absolute inset-0 grid place-items-center rounded-[20px] bg-black/40 text-white">
@@ -100,7 +103,7 @@ export function FilmHero({ film, today }: { film: FilmDto; today: Ymd }) {
   const when = film.kind === "day" ? fmtDayMonth(film.dateFrom, locale) : fmtRange(film.dateFrom, film.dateTo, locale, false);
   return (
     <Link
-      href={`/films/${film.id}`}
+      href={filmHref(film.id)}
       onClick={() => haptic("light")}
       className="press relative flex min-h-[132px] items-center overflow-hidden rounded-[28px] shadow-glass ring-1 ring-white/70"
     >
@@ -123,9 +126,9 @@ export function FilmHero({ film, today }: { film: FilmDto; today: Ymd }) {
           </span>
         </span>
         {rendering ? (
-          <Ring value={film.progress} size={54} stroke={5} label={t.films.renderingAria(Math.round(film.progress * 100))}>
-            <span className="tabular text-[12px] font-bold">{Math.round(film.progress * 100)}%</span>
-          </Ring>
+          <span className="btn-lime grid size-[54px] shrink-0 place-items-center rounded-full ring-2 ring-white/75">
+            <Clapperboard aria-hidden="true" size={22} strokeWidth={1.9} />
+          </span>
         ) : (
           <span className="btn-lime grid size-[54px] shrink-0 place-items-center rounded-full ring-2 ring-white/75">
             <Play aria-hidden="true" size={20} fill="currentColor" strokeWidth={0} className="ml-0.5" />

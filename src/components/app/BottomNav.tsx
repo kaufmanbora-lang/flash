@@ -23,7 +23,7 @@ export function BottomNav() {
   const tabs: Tab[] = [
     { href: "/", label: t.nav.home, icon: Home, match: (p) => p === "/" },
     { href: "/calendar", label: t.nav.calendar, icon: CalendarDays, match: (p) => p.startsWith("/calendar") },
-    { href: "/films", label: t.nav.films, icon: Clapperboard, match: (p) => p.startsWith("/films") || p.startsWith("/projects") },
+    { href: "/films", label: t.nav.films, icon: Clapperboard, match: (p) => p.startsWith("/film") || p.startsWith("/project") },
     { href: "/settings", label: t.nav.settings, icon: Settings, match: (p) => p.startsWith("/settings") },
   ];
 

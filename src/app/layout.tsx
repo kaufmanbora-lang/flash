@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import "@fontsource-variable/onest";
 import "@fontsource-variable/cormorant-garamond";
 import "@fontsource-variable/cormorant-garamond/wght-italic.css";
+import "./film-fonts.css";
 import "./globals.css";
+import { withBase } from "@/lib/base";
 import { Providers } from "./providers";
 
 /** Заставки для запуска с домашнего экрана iPhone (Android строит заставку сам из манифеста). */
@@ -24,26 +26,27 @@ export const metadata: Metadata = {
   title: { default: "Flash", template: "%s · Flash" },
   description: "Приватный видеодневник: записывай маленькие моменты, а Flash соберёт из них фильм.",
   applicationName: "Flash",
-  manifest: "/manifest.webmanifest",
+  manifest: withBase("/manifest.webmanifest"),
   appleWebApp: {
     capable: true,
     title: "Flash",
     statusBarStyle: "default",
     startupImage: SPLASH.map(([w, h, r]) => ({
-      url: `/splash/splash-${w * r}x${h * r}.png`,
+      url: withBase(`/splash/splash-${w * r}x${h * r}.png`),
       media: `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${r}) and (orientation: portrait)`,
     })),
   },
   icons: {
     icon: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: withBase("/icons/icon-192.png"), sizes: "192x192", type: "image/png" },
+      { url: withBase("/icons/icon-512.png"), sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    apple: [{ url: withBase("/icons/apple-touch-icon.png"), sizes: "180x180", type: "image/png" }],
   },
   formatDetection: { telephone: false, date: false, address: false, email: false },
   // Дневник приватный: страницы не должны попадать в поиск.
   robots: { index: false, follow: false },
+  referrer: "same-origin",
   other: { "apple-mobile-web-app-capable": "yes" },
 };
 

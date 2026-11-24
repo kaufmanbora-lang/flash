@@ -1,8 +1,7 @@
 // Сохранение и отправка видео: системное меню «Поделиться» (Telegram, WhatsApp и другие приложения)
-// через Web Share API, а там, где передача файлов не поддерживается, — обычное скачивание.
+// через Web Share API, а там, где передача файлов не поддерживается, — обычное сохранение файла.
 
-/** Больше этого размера файл не грузим в память ради «Поделиться»: браузер на телефоне может не выдержать. */
-export const SHARE_FILE_LIMIT = 700 * 1024 * 1024;
+import { store } from "@/local/store";
 
 export function canShareFiles(): boolean {
   if (typeof navigator === "undefined" || typeof navigator.canShare !== "function") return false;
@@ -13,35 +12,17 @@ export function canShareFiles(): boolean {
   }
 }
 
-/** Скачивает файл целиком (с прогрессом), чтобы передать его в системное меню. */
-export async function fetchAsFile(
-  url: string,
-  filename: string,
-  onProgress: (fraction: number) => void,
-  signal?: AbortSignal,
-): Promise<File> {
-  const res = await fetch(url, { credentials: "same-origin", signal });
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get("content-length") ?? 0);
-  const reader = res.body.getReader();
-  const chunks: BlobPart[] = [];
-  let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.byteLength;
-    if (total > 0) onProgress(Math.min(1, loaded / total));
-  }
-  onProgress(1);
-  return new File(chunks, filename, { type: "video/mp4" });
+/** Файл из хранилища на устройстве, готовый к отправке. Данные не копируются в память. */
+export async function storedFile(key: string, fileName: string, type: string): Promise<File | null> {
+  const blob = await store.getBlob(key);
+  return blob ? new File([blob], fileName, { type: type || blob.type }) : null;
 }
 
 export type ShareResult = "shared" | "cancelled" | "needs-gesture" | "unsupported";
 
 /**
  * Открывает системное меню с файлом. Браузер разрешает это только сразу после нажатия:
- * если файл готовился долго, вернётся 'needs-gesture' — нужно ещё одно нажатие.
+ * если что-то задержалось, вернётся 'needs-gesture' — нужно ещё одно нажатие.
  */
 export async function shareFile(file: File, title: string): Promise<ShareResult> {
   if (!canShareFiles() || !navigator.canShare({ files: [file] })) return "unsupported";
@@ -56,28 +37,7 @@ export async function shareFile(file: File, title: string): Promise<ShareResult>
   }
 }
 
-export async function shareLink(url: string, title: string): Promise<ShareResult> {
-  if (typeof navigator.share === "function") {
-    try {
-      await navigator.share({ url, title });
-      return "shared";
-    } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return "cancelled";
-    }
-  }
-  return "unsupported";
-}
-
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Запускает скачивание по ссылке; сервер отдаёт файл с заголовком «сохранить как». */
+/** Сохраняет файл на устройство: браузер предложит место или положит его в «Загрузки». */
 export function startDownload(url: string, filename: string): void {
   const a = document.createElement("a");
   a.href = url;
@@ -86,4 +46,12 @@ export function startDownload(url: string, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/** Сохраняет на устройство данные, которых ещё нет в хранилище (архив, календарь напоминаний). */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  startDownload(url, filename);
+  // Адрес нужен браузеру, пока он не начал читать файл; большой архив читается долго.
+  setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
 }

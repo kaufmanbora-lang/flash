@@ -10,7 +10,7 @@ export type MusicChoice = z.infer<typeof musicChoice>;
 
 export interface UserSettings {
   notifications: {
-    /** Напоминания включены (на устройстве дополнительно нужна подписка на push). */
+    /** Напоминания добавлены в календарь телефона (отметка для подсказок в интерфейсе). */
     enabled: boolean;
     perDay: number;
     mode: "random" | "fixed";

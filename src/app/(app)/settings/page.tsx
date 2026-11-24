@@ -3,40 +3,29 @@
 import clsx from "clsx";
 import {
   Archive,
-  BellRing,
+  ArchiveRestore,
+  CalendarClock,
+  CalendarPlus,
   Check,
   Clapperboard,
   Globe,
-  KeyRound,
-  LogOut,
+  HardDrive,
   Palette,
   Plus,
+  RotateCcw,
   ShieldCheck,
   Smartphone,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import useSWR from "swr";
 import { api, errorText, fetcher } from "@/client/api";
-import { useMe } from "@/client/hooks";
+import { useMe, useToday } from "@/client/hooks";
 import { useLocale, useT } from "@/client/i18n";
-import { allDrafts, deleteDraft } from "@/client/idb";
-import {
-  canPromptInstall,
-  disablePush,
-  enablePush,
-  getPushState,
-  isIos,
-  isStandalone,
-  onInstallChange,
-  promptInstall,
-  type PushState,
-} from "@/client/pwa";
-import { startDownload } from "@/client/share";
-import { clearPersistentCache } from "@/app/providers";
+import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from "@/client/pwa";
+import { downloadBlob } from "@/client/share";
 import { Page, Reveal, TitleHeader } from "@/components/app/Page";
 import { FilmOptionsFields } from "@/components/films/FilmOptions";
 import { Button } from "@/components/ui/Button";
@@ -46,10 +35,14 @@ import { ConfirmSheet, Sheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { LOCALES, type Locale } from "@/i18n";
 import { APP_VERSION, FILM_STYLE_NAMES, MUSIC_STYLE_NAMES } from "@/lib/constants";
-import { isValidHm } from "@/lib/dates";
-import { fmtBytes } from "@/lib/format";
+import { addDays, isValidHm, type Ymd } from "@/lib/dates";
+import { fmtBytes, fmtDayMonth } from "@/lib/format";
 import type { UserSettings } from "@/lib/settings";
 import type { FilmOptions, MeDto, StorageDto } from "@/lib/types";
+import { exportBackup, importBackup, wipeDiary } from "@/local/backup";
+import { buildReminderCalendar, rememberRemindersUntil, REMINDER_DAYS, remindersUntil } from "@/local/calendar";
+import { requestPersistence } from "@/local/recording";
+import { store } from "@/local/store";
 
 type Patch = { [K in keyof UserSettings]?: Partial<UserSettings[K]> };
 
@@ -92,31 +85,28 @@ export default function SettingsPage() {
   const t = useT();
   const s = t.settings;
   const toast = useToast();
-  const router = useRouter();
+  const today = useToday();
   const { locale, setLocale } = useLocale();
-  const { mutate } = useSWRConfig();
   const { data: me, mutate: mutateMe } = useMe();
-  const { data: storageData } = useSWR<{ storage: StorageDto }>("/api/account/storage", fetcher);
+  const { data: storageData, mutate: reloadStorage } = useSWR<{ storage: StorageDto }>("/api/account/storage", fetcher);
 
-  const [pushState, setPushState] = useState<PushState | null>(null);
-  const [pushBusy, setPushBusy] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
   const [installable, setInstallable] = useState(false);
   const [standalone, setStandalone] = useState(false);
   const [nameSheet, setNameSheet] = useState(false);
   const [name, setName] = useState("");
   const [lookSheet, setLookSheet] = useState(false);
   const [look, setLook] = useState<FilmOptions | null>(null);
-  const [passwordSheet, setPasswordSheet] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [danger, setDanger] = useState<null | "data" | "account">(null);
-  const [dangerPassword, setDangerPassword] = useState("");
-  const [logout, setLogout] = useState(false);
+  const [danger, setDanger] = useState<null | "data" | "all">(null);
+  const [confirmWord, setConfirmWord] = useState("");
   const [busy, setBusy] = useState(false);
   const [newTime, setNewTime] = useState("12:00");
+  const [until, setUntil] = useState<Ymd | null>(null);
+  const [exporting, setExporting] = useState<number | null>(null);
+  const [importing, setImporting] = useState<number | null>(null);
 
   useEffect(() => {
-    void getPushState().then(setPushState);
+    void remindersUntil().then(setUntil).catch(() => {});
     const update = () => {
       setInstallable(canPromptInstall());
       setStandalone(isStandalone());
@@ -125,12 +115,13 @@ export default function SettingsPage() {
     return onInstallChange(update);
   }, []);
 
-  // Переход по ссылке «Уведомления» с главного экрана.
+  // Переход по ссылке «Напоминания» с главного экрана.
   useEffect(() => {
     if (me && window.location.hash) {
       document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [me]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!me]);
 
   if (!me) {
     return (
@@ -148,7 +139,7 @@ export default function SettingsPage() {
   const settings = me.settings;
   const n = settings.notifications;
 
-  /** Сохраняет изменение настроек: сразу в интерфейсе, затем на сервере. */
+  /** Сохраняет изменение настроек: сразу в интерфейсе, затем в хранилище. */
   const update = async (patch: Patch) => {
     const optimistic: MeDto = { ...me, settings: merge(settings, patch) };
     await mutateMe(optimistic, { revalidate: false });
@@ -160,73 +151,11 @@ export default function SettingsPage() {
     }
   };
 
-  const toggleNotifications = async (enabled: boolean) => {
-    if (!enabled) {
-      await update({ notifications: { enabled: false } });
-      return;
-    }
-    setPushBusy(true);
-    try {
-      let state = pushState;
-      // Запрос разрешения идёт только здесь — по явному нажатию пользователя.
-      if (me.push.publicKey && state !== "subscribed" && state !== "unsupported" && state !== "needs-install") {
-        state = await enablePush(me.push.publicKey);
-        setPushState(state);
-      }
-      await update({ notifications: { enabled: true }, onboarding: { pushPromptDismissed: true } });
-      if (state === "denied") toast(s.notifications.device.denied, "info");
-      else if (state === "needs-install") toast(s.notifications.device.needsInstall, "info");
-      else if (state === "subscribed") void mutateMe();
-    } catch (err) {
-      toast(errorText(t, err), "error");
-    } finally {
-      setPushBusy(false);
-    }
-  };
-
-  const enableDevice = async () => {
-    if (!me.push.publicKey) return;
-    setPushBusy(true);
-    try {
-      const state = await enablePush(me.push.publicKey);
-      setPushState(state);
-      if (state === "subscribed") {
-        toast(s.notifications.deviceOn, "success");
-        void mutateMe();
-      } else if (state === "denied") toast(s.notifications.device.denied, "info");
-    } catch (err) {
-      toast(errorText(t, err), "error");
-    } finally {
-      setPushBusy(false);
-    }
-  };
-
-  const disableDevice = async () => {
-    setPushBusy(true);
-    await disablePush();
-    setPushState(await getPushState());
-    void mutateMe();
-    setPushBusy(false);
-  };
-
-  const testPush = async () => {
-    setPushBusy(true);
-    try {
-      const res = await api<{ delivered: number }>("/api/push/test", { method: "POST", body: {} });
-      toast(res.delivered > 0 ? s.notifications.testSent(res.delivered) : s.notifications.testNone, res.delivered > 0 ? "success" : "info");
-    } catch (err) {
-      toast(errorText(t, err), "error");
-    } finally {
-      setPushBusy(false);
-    }
-  };
-
   const saveName = async () => {
     if (!name.trim()) return;
     setBusy(true);
     try {
       await api("/api/me", { method: "PATCH", body: { name: name.trim() } });
-      await mutateMe();
       setNameSheet(false);
       toast(t.common.saved, "success");
     } catch (err) {
@@ -236,57 +165,71 @@ export default function SettingsPage() {
     }
   };
 
-  const changePassword = async () => {
-    setBusy(true);
+  /** Готовит файл с событиями-напоминаниями: телефон сам предложит добавить их в календарь. */
+  const addReminders = async () => {
+    const appUrl = new URL(".", window.location.href).toString();
+    const calendar = buildReminderCalendar(n, today, [...store.projects.values()], locale, appUrl);
+    downloadBlob(new Blob([calendar.ics], { type: "text/calendar;charset=utf-8" }), "flash-reminders.ics");
+    await rememberRemindersUntil(calendar.until).catch(() => {});
+    setUntil(calendar.until);
+    void update({ notifications: { enabled: true }, onboarding: { pushPromptDismissed: true } });
+    toast(s.notifications.added(calendar.events), "success");
+  };
+
+  const doExport = async () => {
+    if (store.moments.size === 0 && store.films.size === 0) {
+      toast(s.data.exportEmpty, "info");
+      return;
+    }
+    setExporting(0);
     try {
-      await api("/api/account/password", { body: { current: currentPassword, next: newPassword } });
-      setPasswordSheet(false);
-      setCurrentPassword("");
-      setNewPassword("");
-      toast(s.account.passwordChanged, "success");
-    } catch (err) {
-      toast(errorText(t, err), "error");
+      const { blob, fileName } = await exportBackup((p) => setExporting(p.totalBytes > 0 ? p.doneBytes / p.totalBytes : 0));
+      downloadBlob(blob, fileName);
+      toast(s.data.exported, "success");
+    } catch {
+      toast(s.data.exportFailed, "error");
     } finally {
-      setBusy(false);
+      setExporting(null);
     }
   };
 
-  const leave = async () => {
-    clearPersistentCache();
-    await mutate(() => true, undefined, { revalidate: false });
-    router.replace("/login");
-  };
-
-  const doLogout = async () => {
-    setBusy(true);
-    // Подписка этого устройства снимается: уведомления не должны приходить после выхода.
-    await disablePush().catch(() => {});
-    await api("/api/auth/logout", { method: "POST", body: {} }).catch(() => {});
-    await leave();
+  const doImport = async (file: File | undefined) => {
+    if (!file) return;
+    setImporting(0);
+    try {
+      const result = await importBackup(file, (p) => setImporting(p.totalBytes > 0 ? p.doneBytes / p.totalBytes : 0));
+      toast(s.data.imported(result.moments, result.films, result.skipped), "success");
+      void reloadStorage();
+    } catch (err) {
+      const quota = (err as { name?: string } | null)?.name === "QuotaExceededError";
+      toast(quota ? t.errors.quota_exceeded : s.data.importFailed, "error");
+    } finally {
+      setImporting(null);
+      if (importRef.current) importRef.current.value = "";
+    }
   };
 
   const doDelete = async () => {
     if (!danger) return;
     setBusy(true);
     try {
-      await api("/api/account/delete", { body: { password: dangerPassword, scope: danger } });
-      // Незагруженные черновики на устройстве тоже относятся к данным пользователя.
-      for (const draft of await allDrafts().catch(() => [])) await deleteDraft(draft.clientId).catch(() => {});
-      setDangerPassword("");
-      if (danger === "account") {
-        await disablePush().catch(() => {});
-        await leave();
-        return;
-      }
+      await wipeDiary(danger === "data");
       setDanger(null);
-      clearPersistentCache();
-      await mutate((key) => typeof key === "string" && key.startsWith("/api/"));
+      setConfirmWord("");
+      setUntil(null);
       toast(s.data.deleted, "success");
+      void reloadStorage();
     } catch (err) {
       toast(errorText(t, err), "error");
     } finally {
       setBusy(false);
     }
+  };
+
+  const protect = async () => {
+    const granted = await requestPersistence();
+    toast(granted ? s.storage.protected : s.storage.protectDenied, granted ? "success" : "info");
+    void reloadStorage();
   };
 
   const storage = storageData?.storage;
@@ -295,26 +238,15 @@ export default function SettingsPage() {
     ? [
         { label: s.storage.originals, value: storage.originalsBytes, color: "bg-leaf-deep" },
         { label: s.storage.films, value: storage.filmsBytes, color: "bg-leaf" },
-        { label: s.storage.playback, value: storage.playbackBytes, color: "bg-lime" },
-        { label: s.storage.other, value: storage.otherBytes, color: "bg-lime-soft" },
+        { label: s.storage.other, value: storage.otherBytes, color: "bg-lime" },
       ]
     : [];
-  const storageBase = storage ? Math.max(storage.quotaBytes || storage.totalBytes, 1) : 1;
-
-  const deviceText =
-    pushState === "subscribed"
-      ? s.notifications.device.subscribed
-      : pushState === "needs-install"
-        ? s.notifications.device.needsInstall
-        : pushState === "denied"
-          ? s.notifications.device.denied
-          : pushState === "unsupported"
-            ? s.notifications.device.unsupported
-            : s.notifications.device.off;
+  const storageBase = storage ? Math.max(storage.totalBytes, 1) : 1;
 
   const lookSummary = `${settings.film.style === "auto" ? t.options.styleAuto : FILM_STYLE_NAMES[settings.film.style]} · ${
     settings.film.music === "auto" ? t.options.musicAuto : settings.film.music === "none" ? t.options.musicNone : MUSIC_STYLE_NAMES[settings.film.music]
   }`;
+  const remindersExpiring = until !== null && until <= addDays(today, 10);
 
   return (
     <Page>
@@ -324,7 +256,7 @@ export default function SettingsPage() {
         <Section title={s.profile.title} icon={<UserRound aria-hidden="true" size={15} />}>
           <Row
             title={me.user.name}
-            hint={me.user.email}
+            hint={s.profile.nameHint}
             icon={<span className="text-[17px] font-bold">{(me.user.name[0] ?? "F").toLocaleUpperCase()}</span>}
             onClick={() => {
               setName(me.user.name);
@@ -338,123 +270,106 @@ export default function SettingsPage() {
           </Row>
         </Section>
 
-        <Section id="notifications" title={s.notifications.title} icon={<BellRing aria-hidden="true" size={15} />} delay={1}>
-          <Row title={s.notifications.enable} hint={s.notifications.enableHint}>
-            <Toggle checked={n.enabled} onChange={(v) => void toggleNotifications(v)} label={s.notifications.enable} disabled={pushBusy} />
-          </Row>
+        <Section id="notifications" title={s.notifications.title} icon={<CalendarClock aria-hidden="true" size={15} />} delay={1}>
+          <p className="px-4 py-3.5 text-[14.5px] leading-snug text-muted-strong">{s.notifications.intro}</p>
 
-          <div className="flex flex-col gap-3 px-4 py-3.5">
-            <p className="flex items-start gap-2 text-[14px] leading-snug text-muted-strong" role="status">
-              <span className={clsx("mt-[5px] size-2 shrink-0 rounded-full", pushState === "subscribed" ? "bg-leaf" : "bg-ink/25")} aria-hidden="true" />
-              {deviceText}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {(pushState === "default" || pushState === "granted") && (
-                <Button size="sm" loading={pushBusy} onClick={() => void enableDevice()}>
-                  {s.notifications.deviceEnable}
-                </Button>
-              )}
-              {pushState === "subscribed" && (
-                <>
-                  <Button size="sm" variant="glass" loading={pushBusy} onClick={() => void testPush()}>
-                    {s.notifications.test}
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={pushBusy} onClick={() => void disableDevice()}>
-                    {s.notifications.deviceDisable}
-                  </Button>
-                </>
-              )}
-            </div>
+          <div className="px-4 py-3.5">
+            <p className="mb-2 text-[13.5px] font-semibold text-muted-strong">{s.notifications.mode}</p>
+            <Segmented<"random" | "fixed">
+              label={s.notifications.mode}
+              size="sm"
+              value={n.mode}
+              onChange={(mode) => void update({ notifications: { mode } })}
+              options={[
+                { value: "random", label: s.notifications.modeRandom },
+                { value: "fixed", label: s.notifications.modeFixed },
+              ]}
+            />
+            <p className="t-caption mt-2">{n.mode === "random" ? s.notifications.randomHint : s.notifications.fixedHint}</p>
           </div>
 
-          {n.enabled && (
+          {n.mode === "random" ? (
             <>
-              <div className="px-4 py-3.5">
-                <p className="mb-2 text-[13.5px] font-semibold text-muted-strong">{s.notifications.mode}</p>
-                <Segmented<"random" | "fixed">
-                  label={s.notifications.mode}
-                  size="sm"
-                  value={n.mode}
-                  onChange={(mode) => void update({ notifications: { mode } })}
-                  options={[
-                    { value: "random", label: s.notifications.modeRandom },
-                    { value: "fixed", label: s.notifications.modeFixed },
-                  ]}
+              <Row title={s.notifications.perDay}>
+                <Stepper
+                  value={n.perDay}
+                  min={1}
+                  max={6}
+                  labelMinus={s.notifications.less}
+                  labelPlus={s.notifications.more}
+                  onChange={(perDay) => void update({ notifications: { perDay } })}
                 />
-                <p className="t-caption mt-2">{n.mode === "random" ? s.notifications.randomHint : s.notifications.fixedHint}</p>
-              </div>
-
-              {n.mode === "random" ? (
-                <>
-                  <Row title={s.notifications.perDay}>
-                    <Stepper
-                      value={n.perDay}
-                      min={1}
-                      max={6}
-                      labelMinus={s.notifications.less}
-                      labelPlus={s.notifications.more}
-                      onChange={(perDay) => void update({ notifications: { perDay } })}
-                    />
-                  </Row>
-                  <div className="px-4 py-3.5">
-                    <p className="mb-2.5 text-[16px] font-medium">{s.notifications.activePeriod}</p>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2.5">
-                      <TimeField label={s.notifications.from} value={n.activeFrom} onChange={(activeFrom) => void update({ notifications: { activeFrom } })} />
-                      <TimeField label={s.notifications.to} value={n.activeTo} onChange={(activeTo) => void update({ notifications: { activeTo } })} />
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="px-4 py-3.5">
-                  <p className="mb-2.5 text-[16px] font-medium">{s.notifications.fixedTimes}</p>
-                  <ul className="flex flex-wrap gap-2">
-                    {n.fixedTimes.map((time) => (
-                      <li key={time} className="tabular flex min-h-[44px] items-center gap-1 rounded-full bg-lime-soft pl-4 pr-1 text-[15.5px] font-semibold text-leaf-deep">
-                        {time}
-                        <button
-                          type="button"
-                          aria-label={s.notifications.removeTime(time)}
-                          disabled={n.fixedTimes.length <= 1}
-                          onClick={() => void update({ notifications: { fixedTimes: n.fixedTimes.filter((x) => x !== time) } })}
-                          className="grid size-9 place-items-center rounded-full disabled:opacity-30"
-                        >
-                          <X aria-hidden="true" size={15} strokeWidth={2.6} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                  {n.fixedTimes.length < 6 && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <label className="sr-only" htmlFor="new-time">
-                        {s.notifications.addTime}
-                      </label>
-                      <input id="new-time" type="time" value={newTime} onChange={(e) => isValidHm(e.target.value) && setNewTime(e.target.value)} className={timeInput} />
-                      <Button
-                        size="sm"
-                        variant="glass"
-                        icon={<Plus aria-hidden="true" size={16} />}
-                        disabled={n.fixedTimes.includes(newTime)}
-                        onClick={() => void update({ notifications: { fixedTimes: [...n.fixedTimes, newTime].sort() } })}
-                      >
-                        {s.notifications.addTime}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <Row title={s.notifications.quiet} hint={s.notifications.quietHint}>
-                <Toggle checked={n.quietEnabled} onChange={(quietEnabled) => void update({ notifications: { quietEnabled } })} label={s.notifications.quiet} />
               </Row>
-              {n.quietEnabled && (
-                <div className="flex flex-wrap gap-x-5 gap-y-2.5 px-4 py-3.5">
-                  <TimeField label={s.notifications.from} value={n.quietFrom} onChange={(quietFrom) => void update({ notifications: { quietFrom } })} />
-                  <TimeField label={s.notifications.to} value={n.quietTo} onChange={(quietTo) => void update({ notifications: { quietTo } })} />
+              <div className="px-4 py-3.5">
+                <p className="mb-2.5 text-[16px] font-medium">{s.notifications.activePeriod}</p>
+                <div className="flex flex-wrap gap-x-5 gap-y-2.5">
+                  <TimeField label={s.notifications.from} value={n.activeFrom} onChange={(activeFrom) => void update({ notifications: { activeFrom } })} />
+                  <TimeField label={s.notifications.to} value={n.activeTo} onChange={(activeTo) => void update({ notifications: { activeTo } })} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="px-4 py-3.5">
+              <p className="mb-2.5 text-[16px] font-medium">{s.notifications.fixedTimes}</p>
+              <ul className="flex flex-wrap gap-2">
+                {n.fixedTimes.map((time) => (
+                  <li key={time} className="tabular flex min-h-[44px] items-center gap-1 rounded-full bg-lime-soft pl-4 pr-1 text-[15.5px] font-semibold text-leaf-deep">
+                    {time}
+                    <button
+                      type="button"
+                      aria-label={s.notifications.removeTime(time)}
+                      disabled={n.fixedTimes.length <= 1}
+                      onClick={() => void update({ notifications: { fixedTimes: n.fixedTimes.filter((x) => x !== time) } })}
+                      className="grid size-9 place-items-center rounded-full disabled:opacity-30"
+                    >
+                      <X aria-hidden="true" size={15} strokeWidth={2.6} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {n.fixedTimes.length < 6 && (
+                <div className="mt-3 flex items-center gap-2">
+                  <label className="sr-only" htmlFor="new-time">
+                    {s.notifications.addTime}
+                  </label>
+                  <input id="new-time" type="time" value={newTime} onChange={(e) => isValidHm(e.target.value) && setNewTime(e.target.value)} className={timeInput} />
+                  <Button
+                    size="sm"
+                    variant="glass"
+                    icon={<Plus aria-hidden="true" size={16} />}
+                    disabled={n.fixedTimes.includes(newTime)}
+                    onClick={() => void update({ notifications: { fixedTimes: [...n.fixedTimes, newTime].sort() } })}
+                  >
+                    {s.notifications.addTime}
+                  </Button>
                 </div>
               )}
-              <p className="t-caption px-4 py-3">{s.notifications.projectsHint}</p>
-            </>
+            </div>
           )}
+
+          <Row title={s.notifications.quiet} hint={s.notifications.quietHint}>
+            <Toggle checked={n.quietEnabled} onChange={(quietEnabled) => void update({ notifications: { quietEnabled } })} label={s.notifications.quiet} />
+          </Row>
+          {n.quietEnabled && (
+            <div className="flex flex-wrap gap-x-5 gap-y-2.5 px-4 py-3.5">
+              <TimeField label={s.notifications.from} value={n.quietFrom} onChange={(quietFrom) => void update({ notifications: { quietFrom } })} />
+              <TimeField label={s.notifications.to} value={n.quietTo} onChange={(quietTo) => void update({ notifications: { quietTo } })} />
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2.5 px-4 py-4">
+            <Button block icon={<CalendarPlus aria-hidden="true" size={19} />} onClick={() => void addReminders()}>
+              {s.notifications.add}
+            </Button>
+            <p className="t-caption">{s.notifications.addHint(REMINDER_DAYS)}</p>
+            {until && (
+              <p className={clsx("text-[13.5px] font-semibold", remindersExpiring ? "text-danger" : "text-leaf-deep")} role="status">
+                {remindersExpiring ? s.notifications.expiring(fmtDayMonth(until, locale)) : s.notifications.until(fmtDayMonth(until, locale))}
+              </p>
+            )}
+            <p className="t-caption">{s.notifications.projectsHint}</p>
+            <p className="t-caption">{s.notifications.remove}</p>
+          </div>
         </Section>
 
         <Section title={s.dailyFilm.title} icon={<Clapperboard aria-hidden="true" size={15} />} delay={2}>
@@ -532,15 +447,15 @@ export default function SettingsPage() {
           </Row>
         </Section>
 
-        <Section title={s.storage.title} icon={<Archive aria-hidden="true" size={15} />} delay={4}>
+        <Section title={s.storage.title} icon={<HardDrive aria-hidden="true" size={15} />} delay={4}>
           <div className="px-4 py-4">
             {storage ? (
               <>
-                <p className="tabular text-[24px] font-bold leading-none tracking-[-0.03em]">
-                  {bytes(storage.totalBytes)}
-                  {storage.quotaBytes > 0 && <span className="ml-1.5 text-[15px] font-semibold text-muted-strong">/ {bytes(storage.quotaBytes)}</span>}
+                <p className="tabular text-[24px] font-bold leading-none tracking-[-0.03em]">{bytes(storage.totalBytes)}</p>
+                <p className="t-caption mt-1">
+                  {s.storage.summary(storage.moments, storage.films)}
+                  {storage.quotaBytes > 0 ? ` · ${s.storage.available(bytes(storage.quotaBytes))}` : ""}
                 </p>
-                <p className="t-caption mt-1">{s.storage.summary(storage.moments, storage.films)}</p>
                 <div
                   role="img"
                   aria-label={storageParts.map((p) => `${p.label}: ${bytes(p.value)}`).join(", ")}
@@ -559,28 +474,36 @@ export default function SettingsPage() {
                     </li>
                   ))}
                 </ul>
+                <p className="t-caption mt-3.5">{s.storage.local}</p>
               </>
             ) : (
               <Skeleton className="h-[110px]" />
             )}
           </div>
+          {storage?.persisted ? (
+            <Row title={s.storage.protected} icon={<ShieldCheck aria-hidden="true" size={18} />} />
+          ) : (
+            <Row title={s.storage.protect} hint={s.storage.protectHint} icon={<ShieldCheck aria-hidden="true" size={18} />} onClick={() => void protect()} />
+          )}
+        </Section>
+
+        <Section title={s.data.title} icon={<Archive aria-hidden="true" size={15} />} delay={5}>
           <Row
-            title={s.data.export}
+            title={exporting !== null ? s.data.exporting(Math.round(exporting * 100)) : s.data.export}
             hint={s.data.exportHint}
             icon={<Archive aria-hidden="true" size={18} />}
-            onClick={() => {
-              startDownload("/api/account/export", "flash-archive.zip");
-              toast(s.data.exportStarted, "success");
-            }}
+            onClick={exporting === null && importing === null ? () => void doExport() : undefined}
           />
+          <Row
+            title={importing !== null ? s.data.importing(Math.round(importing * 100)) : s.data.import}
+            hint={s.data.importHint}
+            icon={<ArchiveRestore aria-hidden="true" size={18} />}
+            onClick={exporting === null && importing === null ? () => importRef.current?.click() : undefined}
+          />
+          <input ref={importRef} type="file" accept=".zip,application/zip" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={(e) => void doImport(e.target.files?.[0])} />
         </Section>
 
-        <Section title={s.account.title} icon={<ShieldCheck aria-hidden="true" size={15} />} delay={5}>
-          <Row title={s.account.changePassword} icon={<KeyRound aria-hidden="true" size={18} />} onClick={() => setPasswordSheet(true)} />
-          <Row title={s.account.logout} icon={<LogOut aria-hidden="true" size={18} />} onClick={() => setLogout(true)} />
-        </Section>
-
-        {/* Опасные действия отделены от остальных и требуют пароль. */}
+        {/* Опасные действия отделены от остальных и требуют подтверждения словом. */}
         <Reveal delay={6}>
           <h2 className="mb-2.5 px-1 text-[13px] font-semibold uppercase tracking-[0.1em] text-danger">{s.data.dangerTitle}</h2>
           <div className="glass divide-y divide-line overflow-hidden">
@@ -593,13 +516,13 @@ export default function SettingsPage() {
                 <span className="mt-0.5 block text-[13px] text-danger/80">{s.data.deleteDataHint}</span>
               </span>
             </button>
-            <button type="button" onClick={() => setDanger("account")} className="press flex min-h-[64px] w-full items-center gap-3 px-4 py-3 text-left text-danger">
+            <button type="button" onClick={() => setDanger("all")} className="press flex min-h-[64px] w-full items-center gap-3 px-4 py-3 text-left text-danger">
               <span className="grid size-10 shrink-0 place-items-center rounded-full bg-danger-soft">
-                <UserRound aria-hidden="true" size={18} />
+                <RotateCcw aria-hidden="true" size={18} />
               </span>
               <span>
-                <span className="block text-[16px] font-semibold leading-tight">{s.data.deleteAccount}</span>
-                <span className="mt-0.5 block text-[13px] text-danger/80">{s.data.deleteAccountHint}</span>
+                <span className="block text-[16px] font-semibold leading-tight">{s.data.deleteAll}</span>
+                <span className="mt-0.5 block text-[13px] text-danger/80">{s.data.deleteAllHint}</span>
               </span>
             </button>
           </div>
@@ -623,7 +546,7 @@ export default function SettingsPage() {
           </Button>
         }
       >
-        <Field label={t.auth.name} value={name} maxLength={60} autoComplete="given-name" onChange={(e) => setName(e.target.value)} />
+        <Field label={s.profile.name} value={name} maxLength={60} autoComplete="given-name" onChange={(e) => setName(e.target.value)} />
       </Sheet>
 
       <Sheet
@@ -649,54 +572,32 @@ export default function SettingsPage() {
         {look && <FilmOptionsFields value={look} onChange={(patch) => setLook((prev) => (prev ? { ...prev, ...patch } : prev))} />}
       </Sheet>
 
-      <Sheet
-        open={passwordSheet}
-        onClose={() => setPasswordSheet(false)}
-        title={s.account.changePassword}
-        locked={busy}
-        footer={
-          <Button block loading={busy} disabled={!currentPassword || newPassword.length < 8} onClick={() => void changePassword()}>
-            {t.common.save}
-          </Button>
-        }
-      >
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void changePassword();
-          }}
-        >
-          <Field label={s.account.currentPassword} type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-          <Field label={s.account.newPassword} type="password" autoComplete="new-password" hint={t.auth.passwordHint} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-        </form>
-      </Sheet>
-
       <ConfirmSheet
         open={danger !== null}
         onClose={() => {
           setDanger(null);
-          setDangerPassword("");
+          setConfirmWord("");
         }}
-        onConfirm={doDelete}
-        title={danger === "account" ? s.data.confirmAccountTitle : s.data.confirmDataTitle}
+        onConfirm={async () => {
+          // Пароля нет, поэтому случайное нажатие отсекает слово-подтверждение.
+          if (confirmWord.trim().toLocaleLowerCase() !== s.data.confirmWord) return;
+          await doDelete();
+        }}
+        title={danger === "all" ? s.data.confirmAllTitle : s.data.confirmDataTitle}
         message={s.data.confirmText}
         confirmLabel={t.common.delete}
         danger
         busy={busy}
       >
-        <Field label={t.auth.password} type="password" autoComplete="current-password" value={dangerPassword} onChange={(e) => setDangerPassword(e.target.value)} />
+        <Field
+          label={s.data.confirmLabel(s.data.confirmWord)}
+          value={confirmWord}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          onChange={(e) => setConfirmWord(e.target.value)}
+        />
       </ConfirmSheet>
-
-      <ConfirmSheet
-        open={logout}
-        onClose={() => setLogout(false)}
-        onConfirm={doLogout}
-        title={s.account.logoutTitle}
-        message={s.account.logoutText}
-        confirmLabel={s.account.logout}
-        busy={busy}
-      />
     </Page>
   );
 }

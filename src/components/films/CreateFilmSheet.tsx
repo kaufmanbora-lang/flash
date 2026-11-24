@@ -3,7 +3,7 @@
 import { ChevronDown, Clapperboard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 import { api, errorText, fetcher } from "@/client/api";
 import { useMe, useToday } from "@/client/hooks";
 import { useLocale, useT } from "@/client/i18n";
@@ -26,6 +26,7 @@ import {
 } from "@/lib/dates";
 import { capitalize, fmtMonthName, fmtRange } from "@/lib/format";
 import type { DaySummary, FilmDto, FilmOptions } from "@/lib/types";
+import { renderHref } from "./FilmCard";
 import { FilmOptionsFields } from "./FilmOptions";
 
 type Kind = "day" | "week" | "month" | "year" | "custom";
@@ -51,7 +52,6 @@ export function CreateFilmSheet({
   const router = useRouter();
   const today = useToday();
   const { locale } = useLocale();
-  const { mutate } = useSWRConfig();
   const { data: me } = useMe();
 
   const [kind, setKind] = useState<Kind>(initialKind);
@@ -113,10 +113,9 @@ export function CreateFilmSheet({
       const res = await api<{ film: FilmDto }>("/api/films", {
         body: { kind, dateFrom: from, dateTo: to, variant, ...options },
       });
-      void mutate((key) => typeof key === "string" && (key.startsWith("/api/films") || key.startsWith("/api/home")));
-      toast(f.queued, "success");
       onClose();
-      router.push(`/films/${res.film.id}`);
+      // Фильм собирается на этом устройстве — сразу открываем экран сборки.
+      router.push(renderHref(res.film.id));
     } catch (err) {
       toast(errorText(t, err), "error");
     } finally {

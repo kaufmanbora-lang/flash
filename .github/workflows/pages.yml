@@ -1,0 +1,64 @@
+# Собирает Flash и публикует его на GitHub Pages при каждой отправке в ветку github-pages.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [github-pages]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Одновременно идёт одна публикация; начатую не прерываем.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Музыка создаётся синтезатором и в репозитории не хранится; между сборками она берётся из кэша.
+      - name: Restore music library
+        uses: actions/cache@v4
+        with:
+          path: public/music
+          key: music-${{ hashFiles('src/music/**', 'scripts/generate-music.ts') }}
+
+      - name: Generate music library
+        run: npm run music
+
+      - name: Build
+        run: npm run build
+        env:
+          # Сайт проекта живёт в подпапке с именем репозитория: https://<user>.github.io/<repo>/
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

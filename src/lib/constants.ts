@@ -1,17 +1,14 @@
-// Общие константы продукта (клиент + сервер + воркер).
+// Общие константы продукта.
 
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "2.0.0";
 
 /** В один день можно сохранить от одного до трёх моментов. */
 export const MAX_MOMENTS_PER_DAY = 3;
 
 /** Минимальная длина одного момента. */
 export const MIN_MOMENT_MS = 10_000;
-/** Допуск сервера: кодировщики камер иногда отдают на пару кадров меньше. */
+/** Допуск при сохранении: кодировщики камер иногда отдают на пару кадров меньше. */
 export const MIN_MOMENT_SERVER_MS = 9_400;
-
-/** Размер части при загрузке. S3 требует ≥ 5 МБ для всех частей, кроме последней. */
-export const UPLOAD_CHUNK_BYTES = 6 * 1024 * 1024;
 
 export const NOTE_MAX = 500;
 
@@ -103,5 +100,3 @@ export const VIDEO_EXT_BY_MIME: Record<string, string> = {
   "video/x-msvideo": "avi",
 };
 
-export const SESSION_COOKIE = "flash_session";
-export const AUTH_FLAG_COOKIE = "flash_auth";

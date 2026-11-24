@@ -1,13 +1,11 @@
 "use client";
 
-import clsx from "clsx";
 import { motion } from "framer-motion";
 import { Check, Clock3, Plus, Video } from "lucide-react";
 import Link from "next/link";
 import { haptic } from "@/client/haptics";
 import { useT } from "@/client/i18n";
-import type { DraftInfo } from "@/client/idb";
-import { DraftTile, MomentThumb } from "@/components/moments/MomentThumb";
+import { MomentThumb } from "@/components/moments/MomentThumb";
 import { useToast } from "@/components/ui/Toast";
 import { fmtClock } from "@/lib/format";
 import type { MomentDto } from "@/lib/types";
@@ -89,39 +87,21 @@ export function RecordButton({ count, limit }: { count: number; limit: number })
   );
 }
 
-/** Три слота сегодняшнего дня: записанные моменты, идущие загрузки и свободные места. */
-export function TodaySlots({
-  moments,
-  drafts,
-  limit,
-  onOpen,
-}: {
-  moments: MomentDto[];
-  drafts: DraftInfo[];
-  limit: number;
-  onOpen: (moment: MomentDto) => void;
-}) {
+/** Три слота сегодняшнего дня: записанные моменты и свободные места. */
+export function TodaySlots({ moments, limit, onOpen }: { moments: MomentDto[]; limit: number; onOpen: (moment: MomentDto) => void }) {
   const t = useT();
-  const items: ({ kind: "moment"; moment: MomentDto } | { kind: "draft"; draft: DraftInfo })[] = [
-    ...moments.map((moment) => ({ kind: "moment" as const, moment })),
-    ...drafts.map((draft) => ({ kind: "draft" as const, draft })),
-  ];
-  const free = Math.max(0, limit - items.filter((i) => i.kind === "draft" || i.moment.status !== "failed").length);
+  const free = Math.max(0, limit - moments.length);
 
   return (
-    <div className={clsx("grid gap-3", items.length + free > 3 ? "grid-cols-3 sm:grid-cols-4" : "grid-cols-3")}>
-      {items.map((item, i) => (
+    <div className="grid grid-cols-3 gap-3">
+      {moments.map((moment, i) => (
         <motion.div
-          key={item.kind === "moment" ? item.moment.id : item.draft.clientId}
+          key={moment.id}
           initial={{ opacity: 0, scale: 0.94 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
         >
-          {item.kind === "moment" ? (
-            <MomentThumb moment={item.moment} caption={item.moment.time} onClick={() => onOpen(item.moment)} className="w-full" />
-          ) : (
-            <DraftTile draft={item.draft} className="w-full" />
-          )}
+          <MomentThumb moment={moment} caption={moment.time} onClick={() => onOpen(moment)} className="w-full" />
         </motion.div>
       ))}
       {Array.from({ length: free }, (_, i) => (

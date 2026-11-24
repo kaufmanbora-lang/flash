@@ -1,31 +1,22 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { BellRing, Share, Smartphone, Video, X } from "lucide-react";
+import { CalendarClock, Share, Smartphone, Video, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { useSWRConfig } from "swr";
 import { api, errorText } from "@/client/api";
-import { useDrafts, useMe } from "@/client/hooks";
+import { useMe } from "@/client/hooks";
 import { useT } from "@/client/i18n";
-import { clearChunks, findInterrupted, type InterruptedRecording } from "@/client/idb";
-import {
-  canPromptInstall,
-  enablePush,
-  getPushState,
-  isIos,
-  isStandalone,
-  onInstallChange,
-  promptInstall,
-  type PushState,
-} from "@/client/pwa";
-import { newClientId, uploader } from "@/client/uploader";
+import { canPromptInstall, isIos, isStandalone, onInstallChange, promptInstall } from "@/client/pwa";
 import { readVideoMeta } from "@/client/video";
 import { Button, IconButton } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { MAX_MOMENTS_PER_DAY, MIN_MOMENT_MS } from "@/lib/constants";
+import { MIN_MOMENT_MS } from "@/lib/constants";
 import { deviceHm, deviceYmd } from "@/lib/dates";
 import { fmtClock } from "@/lib/format";
 import type { MeDto } from "@/lib/types";
+import { saveMoment } from "@/local/moments";
+import { clearChunks, findInterrupted, type InterruptedRecording } from "@/local/recording";
 
 function Card({ icon, title, text, children, onDismiss, dismissLabel }: { icon: ReactNode; title: string; text: string; children: ReactNode; onDismiss?: () => void; dismissLabel?: string }) {
   return (
@@ -54,58 +45,32 @@ function Card({ icon, title, text, children, onDismiss, dismissLabel }: { icon: 
   );
 }
 
-/**
- * Предложение включить напоминания. Показывается в установленном приложении (на iPhone push
- * работают только так) и только пока пользователь явно не согласился или не отказался.
- */
-function PushCard({ me }: { me: MeDto }) {
+/** Предложение настроить напоминания: они добавляются в календарь телефона. */
+function RemindersCard({ me }: { me: MeDto }) {
   const t = useT();
   const o = t.onboarding;
-  const toast = useToast();
-  const { mutate } = useSWRConfig();
-  const [state, setState] = useState<PushState | null>(null);
-  const [busy, setBusy] = useState(false);
+  const router = useRouter();
+  const [hidden, setHidden] = useState(false);
 
-  useEffect(() => {
-    void getPushState().then(setState);
-  }, []);
-
-  const dismiss = async () => {
-    setState("denied");
-    await api("/api/settings", { method: "PATCH", body: { onboarding: { pushPromptDismissed: true } } }).catch(() => {});
-    void mutate("/api/me");
+  const dismiss = () => {
+    setHidden(true);
+    void api("/api/settings", { method: "PATCH", body: { onboarding: { pushPromptDismissed: true } } }).catch(() => {});
   };
 
-  const enable = async () => {
-    if (!me.push.publicKey) return;
-    setBusy(true);
-    try {
-      const result = await enablePush(me.push.publicKey);
-      if (result === "subscribed") {
-        await api("/api/settings", { method: "PATCH", body: { notifications: { enabled: true }, onboarding: { pushPromptDismissed: true } } });
-        void mutate("/api/me");
-        toast(o.pushEnabled, "success");
-      } else if (result === "denied") {
-        toast(o.pushDenied, "info");
-        await dismiss();
-      }
-      setState(result);
-    } catch (err) {
-      toast(errorText(t, err), "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const eligible = (state === "default" || state === "granted") && !me.settings.onboarding.pushPromptDismissed && (!isIos() || isStandalone());
   return (
     <AnimatePresence>
-      {eligible && (
-        <Card icon={<BellRing aria-hidden="true" size={23} strokeWidth={1.9} />} title={o.pushTitle} text={o.pushText} onDismiss={() => void dismiss()} dismissLabel={o.later}>
-          <Button size="sm" loading={busy} onClick={() => void enable()}>
+      {!hidden && !me.settings.onboarding.pushPromptDismissed && (
+        <Card icon={<CalendarClock aria-hidden="true" size={23} strokeWidth={1.9} />} title={o.pushTitle} text={o.pushText} onDismiss={dismiss} dismissLabel={o.later}>
+          <Button
+            size="sm"
+            onClick={() => {
+              dismiss();
+              router.push("/settings#notifications");
+            }}
+          >
             {o.pushEnable}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => void dismiss()}>
+          <Button size="sm" variant="ghost" onClick={dismiss}>
             {o.later}
           </Button>
         </Card>
@@ -118,7 +83,6 @@ function PushCard({ me }: { me: MeDto }) {
 function InstallCard({ me }: { me: MeDto }) {
   const t = useT();
   const o = t.onboarding;
-  const { mutate } = useSWRConfig();
   const [visible, setVisible] = useState(false);
   const [canPrompt, setCanPrompt] = useState(false);
   const ios = isIos();
@@ -135,7 +99,6 @@ function InstallCard({ me }: { me: MeDto }) {
   const dismiss = async () => {
     setVisible(false);
     await api("/api/settings", { method: "PATCH", body: { onboarding: { installHintDismissed: true } } }).catch(() => {});
-    void mutate("/api/me");
   };
 
   return (
@@ -168,11 +131,10 @@ function InstallCard({ me }: { me: MeDto }) {
 }
 
 /** Запись, оборвавшаяся из-за закрытия приложения: предлагаем сохранить то, что успело записаться. */
-function InterruptedCard({ todayCount }: { todayCount: number }) {
+function InterruptedCard() {
   const t = useT();
   const d = t.draft;
   const toast = useToast();
-  const drafts = useDrafts();
   const [found, setFound] = useState<InterruptedRecording | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -194,12 +156,6 @@ function InterruptedCard({ todayCount }: { todayCount: number }) {
   const save = async () => {
     setBusy(true);
     try {
-      const date = deviceYmd(startedAt);
-      const sameDay = drafts.filter((x) => x.localDate === date && x.state !== "failed").length + (date === deviceYmd() ? todayCount : 0);
-      if (sameDay >= MAX_MOMENTS_PER_DAY) {
-        toast(t.errors.daily_limit, "error");
-        return;
-      }
       const meta = await readVideoMeta(found.blob, 0);
       const durationMs = meta.durationMs || found.approxDurationMs;
       if (durationMs < MIN_MOMENT_MS) {
@@ -207,33 +163,26 @@ function InterruptedCard({ todayCount }: { todayCount: number }) {
         await drop();
         return;
       }
-      await uploader.add({
-        clientId: newClientId(),
+      await saveMoment({
         blob: found.blob,
         mime: found.mime,
-        size: found.blob.size,
         recordedAt: startedAt.toISOString(),
-        localDate: date,
+        localDate: deviceYmd(startedAt),
         localTime: deviceHm(startedAt),
         note: "",
         projectIds: [],
+        // Выбора проектов у прерванной записи не было — она попадает во все идущие.
         autoProjects: true,
         source: "camera",
         durationMs,
         width: meta.width,
         height: meta.height,
         poster: meta.poster,
-        state: "queued",
-        error: null,
-        momentId: null,
-        uploadedBytes: 0,
-        attempts: 0,
-        createdAt: Date.now(),
       });
       await drop();
       toast(t.record.saved, "success");
-    } catch {
-      toast(t.errors.generic, "error");
+    } catch (err) {
+      toast(errorText(t, err), "error");
     } finally {
       setBusy(false);
     }
@@ -258,14 +207,14 @@ function InterruptedCard({ todayCount }: { todayCount: number }) {
 }
 
 /** Подсказки первого запуска и восстановление прерванной записи. */
-export function Onboarding({ todayCount }: { todayCount: number }) {
+export function Onboarding() {
   const { data: me } = useMe();
   if (!me) return null;
   return (
     <div className="flex flex-col gap-3 empty:hidden">
-      <InterruptedCard todayCount={todayCount} />
+      <InterruptedCard />
       <InstallCard me={me} />
-      <PushCard me={me} />
+      <RemindersCard me={me} />
     </div>
   );
 }

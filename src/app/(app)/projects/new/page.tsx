@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, CalendarRange, Check, Infinity as InfinityIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useSWRConfig } from "swr";
 import { api, errorText } from "@/client/api";
 import { haptic } from "@/client/haptics";
 import { useToday } from "@/client/hooks";
@@ -98,7 +97,6 @@ export default function NewProjectPage() {
   const router = useRouter();
   const today = useToday();
   const { locale } = useLocale();
-  const { mutate } = useSWRConfig();
 
   const [step, setStep] = useState<1 | 2>(1);
   /** Новый шаг всегда открывается с начала, а не с позиции прокрутки предыдущего. */
@@ -145,10 +143,9 @@ export default function NewProjectPage() {
           today,
         },
       });
-      void mutate((key) => typeof key === "string" && (key.startsWith("/api/projects") || key.startsWith("/api/home")));
       haptic("success");
       toast(n.created, "success");
-      router.replace(`/projects/${res.id}`);
+      router.replace(`/project?id=${res.id}`);
     } catch (err) {
       toast(errorText(t, err), "error");
       setBusy(false);

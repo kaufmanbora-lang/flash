@@ -1,4 +1,4 @@
-// Строки базы данных и объекты API. Общие для сервера, воркера и интерфейса.
+// Объекты, которыми обмениваются хранилище на устройстве и интерфейс.
 
 import type {
   CoverPreset,
@@ -11,24 +11,10 @@ import type {
   Resolution,
 } from "./constants";
 import type { Ymd } from "./dates";
-import type { PauseSpan, ProjectDay, ProjectProgress, ProjectStatus } from "./projects";
+import type { ProjectDay, ProjectProgress, ProjectStatus } from "./projects";
 import type { MusicChoice, StyleChoice, UserSettings } from "./settings";
-import type { StoredPart } from "./storage";
 
-// ── Строки таблиц ────────────────────────────────────────────
-
-export interface UserRow {
-  id: string;
-  email: string;
-  name: string;
-  password_hash: string;
-  timezone: string;
-  locale: string;
-  settings: unknown;
-  created_at: Date;
-}
-
-export type MomentStatus = "uploading" | "processing" | "ready" | "failed";
+export type MomentStatus = "processing" | "ready" | "failed";
 
 /** Профиль «интересности» по секундам: громкость (дБ) и движение в кадре (0…1). */
 export interface MomentAnalysis {
@@ -36,103 +22,15 @@ export interface MomentAnalysis {
   motion: number[];
 }
 
-export interface MomentRow {
-  id: string;
-  user_id: string;
-  client_id: string;
-  recorded_at: Date;
-  local_date: Ymd;
-  local_time: string;
-  note: string;
-  source: "camera" | "upload";
-  status: MomentStatus;
-  error: string | null;
-  mime: string;
-  ext: string;
-  expected_size: number;
-  size_bytes: number;
-  duration_ms: number;
-  width: number;
-  height: number;
-  has_audio: boolean;
-  original_key: string | null;
-  playback_key: string | null;
-  poster_key: string | null;
-  playback_size: number;
-  poster_size: number;
-  favorite: boolean;
-  analysis: MomentAnalysis | null;
-  upload_id: string | null;
-  parts: StoredPart[];
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface ProjectRow {
-  id: string;
-  user_id: string;
-  title: string;
-  description: string;
-  period_kind: PeriodKind;
-  start_date: Ymd;
-  end_date: Ymd | null;
-  status: ProjectStatus;
-  pauses: PauseSpan[];
-  completed_at: Date | null;
-  cover_kind: "auto" | "preset" | "moment";
-  cover_preset: CoverPreset;
-  cover_moment_id: string | null;
-  cover_key: string | null;
-  cover_size: number;
-  cover_version: number;
-  film_settings: Partial<FilmOptions>;
-  created_at: Date;
-  updated_at: Date;
-}
-
+/**
+ * queued — фильм ждёт сборки («премьеры»); rendering — собирается прямо сейчас;
+ * ready — готов; failed — сборка не удалась.
+ */
 export type FilmStatus = "queued" | "rendering" | "ready" | "failed";
 
 export interface FilmChapter {
   title: string;
   startMs: number;
-}
-
-export interface FilmRow {
-  id: string;
-  user_id: string;
-  project_id: string | null;
-  kind: FilmKind;
-  variant: FilmVariant;
-  title: string;
-  subtitle: string;
-  date_from: Ymd;
-  date_to: Ymd;
-  style: StyleChoice;
-  style_used: FilmStyleId | null;
-  music: MusicChoice;
-  music_used: string[];
-  music_volume: number;
-  orientation: Orientation;
-  resolution: Resolution;
-  status: FilmStatus;
-  progress: number;
-  stage: string;
-  error: string | null;
-  width: number;
-  height: number;
-  duration_ms: number;
-  size_bytes: number;
-  moments_count: number;
-  file_key: string | null;
-  poster_key: string | null;
-  poster_size: number;
-  chapters: FilmChapter[];
-  auto: boolean;
-  stale: boolean;
-  revision: number;
-  created_at: Date;
-  updated_at: Date;
-  rendered_at: Date | null;
 }
 
 /** Параметры оформления фильма, которые выбирает пользователь. */
@@ -144,11 +42,8 @@ export interface FilmOptions {
   resolution: Resolution;
 }
 
-// ── Объекты API ──────────────────────────────────────────────
-
 export interface MomentDto {
   id: string;
-  clientId: string;
   recordedAt: string;
   date: Ymd;
   time: string;
@@ -164,6 +59,8 @@ export interface MomentDto {
   posterUrl: string | null;
   videoUrl: string | null;
   downloadUrl: string | null;
+  /** Имя файла при сохранении на устройство. */
+  fileName: string;
   projectIds: string[];
 }
 
@@ -197,6 +94,10 @@ export interface FilmDto {
   posterUrl: string | null;
   videoUrl: string | null;
   downloadUrl: string | null;
+  /** Имя файла при сохранении на устройство. */
+  fileName: string;
+  /** Тип готового файла: video/mp4 или video/webm (зависит от браузера, собравшего фильм). */
+  mime: string;
   chapters: FilmChapter[];
   auto: boolean;
   stale: boolean;
@@ -269,6 +170,7 @@ export interface HomeDto {
   activity: DaySummary[];
   recent: MomentDto[];
   latestFilm: FilmDto | null;
+  /** Фильмы, которые ждут сборки (или собираются прямо сейчас). */
   rendering: FilmDto[];
   projects: ProjectDto[];
   onThisDay: { year: number; date: Ymd; moments: MomentDto[] }[];
@@ -276,21 +178,22 @@ export interface HomeDto {
 }
 
 export interface MeDto {
-  user: { id: string; email: string; name: string; timezone: string; locale: string; createdAt: string };
+  user: { name: string; timezone: string; locale: string; createdAt: string };
   settings: UserSettings;
-  limits: { maxPerDay: number; minMomentMs: number; chunkBytes: number; quotaBytes: number };
-  push: { publicKey: string | null; devices: number };
+  limits: { maxPerDay: number; minMomentMs: number };
 }
 
 export interface StorageDto {
   totalBytes: number;
+  /** Сколько браузер готов выделить приложению (0 — неизвестно). */
   quotaBytes: number;
   originalsBytes: number;
-  playbackBytes: number;
   filmsBytes: number;
   otherBytes: number;
   moments: number;
   films: number;
+  /** Браузер пообещал не удалять данные приложения при нехватке места. */
+  persisted: boolean;
 }
 
 export interface StatsDto {
@@ -309,10 +212,4 @@ export interface MusicTrackDto {
   title: string;
   durationSec: number;
   url: string;
-}
-
-export interface UploadInitDto {
-  moment: MomentDto;
-  chunkBytes: number;
-  uploadedParts: number[];
 }

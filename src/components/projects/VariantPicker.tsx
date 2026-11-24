@@ -2,11 +2,10 @@
 
 import clsx from "clsx";
 import { motion } from "framer-motion";
-import { Check, Clapperboard, Film, Layers, Lock, MonitorPlay, type LucideIcon } from "lucide-react";
+import { Check, Clapperboard, Film, Hourglass, Layers, Lock, MonitorPlay, type LucideIcon } from "lucide-react";
 import { haptic } from "@/client/haptics";
 import { useT } from "@/client/i18n";
 import { isRendering } from "@/components/films/FilmCard";
-import { Ring } from "@/components/ui/Feedback";
 import type { ProjectVariant } from "@/lib/constants";
 import type { VariantInfo } from "@/lib/types";
 
@@ -38,7 +37,7 @@ export function VariantPicker({
         const rendering = !!film && isRendering(film);
         const ready = !!film?.hasFile;
         let sub: string;
-        if (rendering) sub = `${t.films.status.rendering} · ${Math.round((film?.progress ?? 0) * 100)}%`;
+        if (rendering) sub = t.films.status.queued;
         else if (ready && film) sub = t.fmt.duration(film.durationMs);
         else if (!info.available) sub = info.variant === "full" ? pp.needMoments : pp.variantLocked(t.fmt.duration(info.needSec * 1000));
         else if (info.variant === "full") sub = `≈ ${t.fmt.duration(info.estimateSec * 1000)}`;
@@ -63,7 +62,7 @@ export function VariantPicker({
             <span className="flex w-full items-start justify-between">
               <Icon aria-hidden="true" size={26} strokeWidth={1.7} className={active ? "text-leaf-deep" : "text-ink"} />
               {rendering ? (
-                <Ring value={film?.progress ?? 0} size={26} stroke={3.5} label={t.films.renderingAria(Math.round((film?.progress ?? 0) * 100))} />
+                <Hourglass aria-hidden="true" size={18} className="text-leaf-deep" />
               ) : active ? (
                 <span className="grid size-6 place-items-center rounded-full bg-leaf text-white">
                   <Check aria-hidden="true" size={14} strokeWidth={3} />

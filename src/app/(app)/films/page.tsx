@@ -28,7 +28,7 @@ function ProjectRow({ project }: { project: ProjectDto }) {
   // Идущему проекту важнее, когда он закончится («до 6 декабря»); полный период виден на его странице.
   const tail = pr.started && pr.expectedEnd ? t.project.until(fmtDayMonth(pr.expectedEnd, locale)) : projectDates(project, locale, t);
   return (
-    <Link href={`/projects/${project.id}`} onClick={() => haptic("light")} className="glass press flex items-center gap-3.5 p-2.5 pr-4">
+    <Link href={`/project?id=${project.id}`} onClick={() => haptic("light")} className="glass press flex items-center gap-3.5 p-2.5 pr-4">
       <ProjectCover cover={project.cover} shade={false} className="size-[84px] shrink-0 rounded-[20px]" />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-serif text-[22px] font-semibold leading-none">{project.title}</span>
@@ -50,7 +50,7 @@ function ProjectPoster({ project }: { project: ProjectDto }) {
   const { locale } = useLocale();
   const film = project.film;
   return (
-    <Link href={`/projects/${project.id}`} onClick={() => haptic("light")} className="press block">
+    <Link href={`/project?id=${project.id}`} onClick={() => haptic("light")} className="press block">
       <ProjectCover cover={project.cover} className="aspect-[4/5] rounded-[24px] shadow-float ring-1 ring-white/70">
         <div className="flex h-full flex-col justify-end p-3.5 text-white">
           <h3 className="line-clamp-3 font-serif text-[24px] font-semibold leading-[0.98] [text-shadow:0_2px_14px_rgb(0_0_0/0.4)]">{project.title}</h3>
@@ -92,9 +92,7 @@ function FilmsContent() {
     data: filmsData,
     error: filmsError,
     mutate: reloadFilms,
-  } = useSWR<{ films: FilmDto[] }>("/api/films", fetcher, {
-    refreshInterval: (d) => (d?.films.some(isRendering) ? 2000 : 0),
-  });
+  } = useSWR<{ films: FilmDto[] }>("/api/films", fetcher);
   const {
     data: projectsData,
     error: projectsError,
@@ -161,7 +159,7 @@ function FilmsContent() {
               <div className="flex flex-col gap-6">
                 {working.length > 0 && (
                   <Reveal>
-                    <SectionTitle>{f.status.rendering}</SectionTitle>
+                    <SectionTitle>{f.waitingSection}</SectionTitle>
                     <div className="flex flex-col gap-3">
                       {working.map((film) => (
                         <FilmCard key={film.id} film={film} />
