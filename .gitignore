@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# local data: embedded Postgres, local storage, temp render files
+.data/
+
+# portable toolchain and local launch config (this machine only)
+tools/
+.claude/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# generated music (re-create with `npm run music`)
+assets/music/*.m4a
+assets/music/manifest.json
+
+# misc
+.DS_Store
+*.log
+coverage/

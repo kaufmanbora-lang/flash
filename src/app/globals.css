@@ -1,0 +1,517 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   Flash — дизайн-система
+   Молочный фон, мягкий салатовый акцент, Liquid Glass.
+   Все цвета и радиусы — токены; в компонентах нет «сырых» hex.
+   ───────────────────────────────────────────────────────────── */
+
+@theme static {
+  --color-milk: #f8faf5;
+  --color-surface: #ffffff;
+  --color-lime: #b5df83;
+  --color-lime-soft: #e2f2d0;
+  --color-lime-mist: #f0f8e6;
+  --color-leaf: #8bc65b;
+  --color-leaf-dark: #6fae45;
+  /* Акцентный текст: #8BC65B слишком светлый для чтения, поэтому текст — темнее на тон. */
+  --color-leaf-deep: #3e7420;
+  --color-ink: #20301e;
+  --color-muted: #84917d;
+  /* Вторичный мелкий текст: контраст 4.5:1 на молочном фоне. */
+  --color-muted-strong: #5f6d58;
+  --color-line: rgb(32 48 30 / 0.08);
+  --color-danger: #c0392f;
+  --color-danger-soft: #fbe9e6;
+  --color-night: #0f150e;
+
+  --font-sans: "Onest Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-serif: "Cormorant Garamond Variable", "Cormorant Garamond", Georgia, "Times New Roman", serif;
+
+  --radius-glass: 28px;
+  --radius-tile: 22px;
+
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --shadow-glass:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(255 255 255 / 0.5),
+    inset 0 -10px 18px -14px rgb(139 198 91 / 0.22), 0 1px 1px rgb(32 48 30 / 0.03),
+    0 14px 34px -18px rgb(62 116 32 / 0.28);
+  --shadow-float: 0 18px 44px -18px rgb(62 116 32 / 0.38), 0 4px 12px -6px rgb(32 48 30 / 0.1);
+  --shadow-lime:
+    inset 0 1.5px 0 rgb(255 255 255 / 0.8), inset 0 -3px 8px rgb(88 150 40 / 0.22),
+    0 12px 26px -10px rgb(124 190 70 / 0.7), 0 2px 5px rgb(88 150 40 / 0.18);
+
+  --animate-breathe: breathe 3.4s ease-in-out infinite;
+  --animate-ring: ring 2.6s var(--ease-soft) infinite;
+  --animate-shimmer: shimmer 1.7s linear infinite;
+  --animate-drift: drift 26s ease-in-out infinite;
+  --animate-drift-slow: drift 38s ease-in-out infinite reverse;
+  --animate-sheen: sheen 5.5s var(--ease-soft) infinite;
+  --animate-rec: rec 1.2s ease-in-out infinite;
+}
+
+/* Ключевые кадры объявлены на верхнем уровне, чтобы они попадали в сборку всегда. */
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}
+@keyframes ring {
+  0% { transform: scale(0.9); opacity: 0.55; }
+  70%, 100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(-10px, 14px, 0) rotate(2.5deg); }
+}
+@keyframes sheen {
+  0%, 62% { transform: translateX(-130%) skewX(-18deg); }
+  100% { transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes rec {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@layer base {
+  html {
+    background: var(--color-milk);
+    color: var(--color-ink);
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* В установленном приложении страница не должна «резиниться» как сайт. */
+  @media (display-mode: standalone) {
+    body {
+      overscroll-behavior-y: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    input,
+    textarea,
+    [contenteditable] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="tab"],
+  [role="switch"] {
+    touch-action: manipulation;
+  }
+
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  /* 16px в полях — иначе Safari на iPhone увеличивает страницу при фокусе. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+    font-family: inherit;
+  }
+
+  :focus-visible {
+    outline: 2.5px solid var(--color-leaf-deep);
+    outline-offset: 3px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  /* У Cormorant Garamond цифры по умолчанию старостильные: «30 дней» читается как «зо дней». */
+  .font-serif,
+  .wordmark {
+    font-variant-numeric: lining-nums;
+  }
+
+  ::selection {
+    background: var(--color-lime);
+    color: var(--color-ink);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Компонентные классы живут в слое components: утилиты Tailwind (absolute, fixed, rounded-*, text-*)
+   объявлены в более позднем слое и поэтому могут их уточнять. Вне слоя .glass перебивал бы,
+   например, `absolute` своим `position: relative`. */
+@layer components {
+
+/* ── Liquid Glass ───────────────────────────────────────────── */
+
+.glass {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--radius-glass);
+  background: linear-gradient(
+    140deg,
+    rgb(255 255 255 / 0.84) 0%,
+    rgb(255 255 255 / 0.6) 55%,
+    rgb(244 250 236 / 0.64) 100%
+  );
+  -webkit-backdrop-filter: blur(22px) saturate(165%);
+  backdrop-filter: blur(22px) saturate(165%);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Блик по кромке: светлая грань сверху-слева и салатовый отсвет снизу-справа. */
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgb(255 255 255 / 0.95) 0%,
+    rgb(255 255 255 / 0.15) 32%,
+    rgb(181 223 131 / 0.38) 68%,
+    rgb(255 255 255 / 0.85) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Плотное стекло для плавающих панелей (навигация, шторки): читаемость важнее прозрачности. */
+.glass-strong {
+  background: linear-gradient(140deg, rgb(255 255 255 / 0.9) 0%, rgb(250 253 246 / 0.8) 100%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+}
+
+/* Салатовое стекло: выбранное состояние. */
+.glass-tint {
+  background: linear-gradient(
+    140deg,
+    rgb(232 245 215 / 0.95) 0%,
+    rgb(206 234 170 / 0.82) 60%,
+    rgb(190 226 148 / 0.8) 100%
+  );
+}
+
+/* Тёмное стекло поверх видео и камеры. */
+.glass-dark {
+  position: relative;
+  border-radius: var(--radius-glass);
+  background: linear-gradient(140deg, rgb(20 28 18 / 0.5), rgb(20 28 18 / 0.34));
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    inset 0 0 0 1px rgb(255 255 255 / 0.1),
+    0 10px 30px -14px rgb(0 0 0 / 0.5);
+  color: #fff;
+}
+
+/* Системная настройка «уменьшить прозрачность» — стекло становится непрозрачным. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong {
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-tint {
+    background: var(--color-lime-soft);
+  }
+  .glass-dark {
+    background: rgb(20 28 18 / 0.92);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* ── Кнопки ─────────────────────────────────────────────────── */
+
+.btn-lime {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--color-ink);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.5) 0%, rgb(255 255 255 / 0) 48%),
+    linear-gradient(180deg, #d6eeb4 0%, #b9e189 46%, #a5d671 100%);
+  box-shadow: var(--shadow-lime);
+}
+
+/* Неактивная кнопка остаётся непрозрачной: она бывает «липкой» и лежит поверх контента. */
+.btn-lime:disabled,
+.btn-lime[aria-disabled="true"] {
+  color: rgb(32 48 30 / 0.42);
+  background: linear-gradient(180deg, #f1f7e8 0%, #e4eed6 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.85),
+    0 0 0 1px rgb(32 48 30 / 0.05),
+    0 10px 24px -16px rgb(62 116 32 / 0.3);
+}
+
+/* Блик, медленно пробегающий по главной кнопке. */
+.sheen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / 0.5), rgb(255 255 255 / 0));
+  animation: var(--animate-sheen);
+  pointer-events: none;
+}
+
+.press {
+  transition:
+    transform 0.2s var(--ease-soft),
+    filter 0.2s var(--ease-soft),
+    opacity 0.2s var(--ease-soft),
+    background-color 0.2s var(--ease-soft),
+    border-color 0.2s var(--ease-soft),
+    color 0.2s var(--ease-soft);
+}
+.press:active:not(:disabled) {
+  transform: scale(0.965);
+  filter: brightness(0.97);
+}
+
+/* ── Текст ──────────────────────────────────────────────────── */
+
+.t-display {
+  font-size: clamp(1.9rem, 8.4vw, 2.5rem);
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+.t-title {
+  font-size: 1.375rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.t-section {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.t-caption {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--color-muted-strong);
+}
+.t-eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.tabular {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.wordmark {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 0.9;
+}
+
+.skeleton {
+  border-radius: 16px;
+  background: linear-gradient(
+    100deg,
+    rgb(226 242 208 / 0.55) 20%,
+    rgb(255 255 255 / 0.95) 40%,
+    rgb(226 242 208 / 0.55) 60%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+} /* @layer components */
+
+/* ── Служебное ──────────────────────────────────────────────── */
+/* Эти классы намеренно вне слоёв: отступы под вырез и полоску жестов должны побеждать любые p-* утилиты. */
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Отступы под вырез, «островок» и полоску жестов. */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top), 14px);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 14px);
+}
+/* Нижний отступ страниц: контент не прячется под плавающей навигацией. */
+.pb-nav {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 132px);
+}
+
+@layer components {
+
+/* ── Плеер ──────────────────────────────────────────────────── */
+/* На низком (горизонтальном) видео центральная кнопка меньше и стоит выше,
+   чтобы не ложиться на шкалу перемотки. Высоту плеера знает контейнерный запрос. */
+.player {
+  container-type: size;
+}
+.player-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.player-play {
+  width: 78px;
+  height: 78px;
+}
+@container (max-height: 320px) {
+  .player-center {
+    padding-bottom: 72px;
+  }
+  .player-play {
+    width: 58px;
+    height: 58px;
+  }
+  .player-play svg {
+    scale: 0.82;
+  }
+}
+/* В узком плеере (вертикальное видео в предпросмотре) общая длительность уступает место кнопкам. */
+@container (max-width: 250px) {
+  .player-total {
+    display: none;
+  }
+}
+
+/* Ползунок громкости. */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--color-leaf) 0%,
+    var(--color-lime) var(--fill, 50%),
+    rgb(32 48 30 / 0.1) var(--fill, 50%)
+  );
+}
+.slider::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(32 48 30 / 0.1);
+}
+.slider::-moz-range-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-lime);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 2px 8px rgb(32 48 30 / 0.22),
+    inset 0 0 0 1px rgb(32 48 30 / 0.06);
+}
+.slider::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(32 48 30 / 0.22);
+}
+
+/* Светлый вариант для плеера. */
+.slider-light::-webkit-slider-runnable-track {
+  height: 5px;
+  background: linear-gradient(90deg, #fff 0%, #fff var(--fill, 0%), rgb(255 255 255 / 0.28) var(--fill, 0%));
+}
+.slider-light::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -5.5px;
+}
+.slider-light::-moz-range-track {
+  height: 5px;
+  background: rgb(255 255 255 / 0.28);
+}
+.slider-light::-moz-range-progress {
+  height: 5px;
+  background: #fff;
+}
+.slider-light::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+}
+
+} /* @layer components */
+
+/* Нативные поля даты и времени в стиле приложения. */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 44px;
+}

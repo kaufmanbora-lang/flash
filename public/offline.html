@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#F8FAF5" />
+    <title>Нет подключения · Flash</title>
+    <!--
+      Запасной экран Service Worker: показывается, когда сети нет, а запрошенная страница ещё не
+      сохранена на устройстве. Страница намеренно самодостаточная — без скриптов и стилей приложения:
+      их может не оказаться в кэше, и тогда экран не открылся бы вовсе.
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        padding: max(env(safe-area-inset-top), 24px) 32px max(env(safe-area-inset-bottom), 24px);
+        background:
+          radial-gradient(60% 45% at 100% 0%, rgb(181 223 131 / 0.55), transparent 70%),
+          radial-gradient(55% 40% at 0% 100%, rgb(226 242 208 / 0.95), transparent 70%), #f8faf5;
+        color: #20301e;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+        text-align: center;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        width: 100%;
+        max-width: 420px;
+      }
+      .wordmark {
+        font-family: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+        font-size: 64px;
+        font-weight: 700;
+        line-height: 0.9;
+        letter-spacing: -0.03em;
+      }
+      .wordmark span {
+        color: #8bc65b;
+      }
+      .icon {
+        display: grid;
+        place-items: center;
+        width: 80px;
+        height: 80px;
+        margin: 32px auto 0;
+        border-radius: 50%;
+        background: rgb(255 255 255 / 0.8);
+        color: #3e7420;
+        box-shadow:
+          inset 0 1px 0 #fff,
+          0 14px 34px -18px rgb(62 116 32 / 0.4);
+      }
+      h1 {
+        margin: 20px 0 0;
+        font-size: 22px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 8px 0 0;
+        color: #5f6d58;
+        font-size: 15.5px;
+        line-height: 1.4;
+      }
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 28px;
+      }
+      a,
+      button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 56px;
+        padding: 0 24px;
+        border: 0;
+        border-radius: 999px;
+        color: #20301e;
+        font: inherit;
+        font-size: 17px;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      button {
+        background: linear-gradient(180deg, #d6eeb4 0%, #b9e189 46%, #a5d671 100%);
+        box-shadow:
+          inset 0 1.5px 0 rgb(255 255 255 / 0.8),
+          0 12px 26px -10px rgb(124 190 70 / 0.7);
+      }
+      a {
+        background: rgb(255 255 255 / 0.75);
+        box-shadow:
+          inset 0 1px 0 #fff,
+          0 0 0 1px rgb(32 48 30 / 0.06);
+      }
+      a:focus-visible,
+      button:focus-visible {
+        outline: 2.5px solid #3e7420;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="wordmark" aria-label="Flash">flash<span>.</span></div>
+      <div class="icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h.01" />
+          <path d="M8.5 16.429a5 5 0 0 1 7 0" />
+          <path d="M5 12.859a10 10 0 0 1 5.17-2.69" />
+          <path d="M19 12.859a10 10 0 0 0-2.007-1.523" />
+          <path d="M2 8.82a15 15 0 0 1 4.177-2.643" />
+          <path d="M22 8.82a15 15 0 0 0-11.288-3.764" />
+          <path d="m2 2 20 20" />
+        </svg>
+      </div>
+      <h1>Нет подключения</h1>
+      <p>Эта страница ещё не сохранена на устройстве. Записанные моменты никуда не делись — они загрузятся, когда появится сеть.</p>
+      <div class="actions">
+        <button type="button" id="retry">Повторить</button>
+        <a href="/">На главную</a>
+      </div>
+    </main>
+    <script>
+      document.getElementById("retry").addEventListener("click", function () {
+        location.reload();
+      });
+      // Сеть вернулась — открываем то, что человек и хотел открыть.
+      window.addEventListener("online", function () {
+        location.reload();
+      });
+    </script>
+  </body>
+</html>
